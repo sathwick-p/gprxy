@@ -1,0 +1,5 @@
+26-09-25
+
+RDS Proxy needs creds to operate on the db in the first place before user make a connection 
+hence need to create a db user 
+

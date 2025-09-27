@@ -1,24 +1,39 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgproto3/v2"
+	"github.com/joho/godotenv"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type gprxyConn struct {
-	conn        net.Conn
-	addr        string
-	backendconn net.Conn
-	bf          *pgproto3.Frontend
-	user        string
+	conn     net.Conn
+	addr     string
+	poolConn *pgxpool.Conn
+	bf       *pgproto3.Frontend
+	user     string
+	db       string
 }
 
+var (
+	poolManager = make(map[string]*pgxpool.Pool)
+	poolMutex   sync.RWMutex
+)
+
 func runGprxy() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Println("No .env file found, using system environment")
+	}
 	host := os.Getenv("DB_HOST")
 	if host == "" {
 		host = "localhost"
@@ -61,10 +76,12 @@ func (pc *gprxyConn) handleConnection() {
 		if err := pc.conn.Close(); err != nil {
 			log.Printf("[%s] error closing client connection: %v", clientAddr, err)
 		}
-		if pc.backendconn != nil {
-			if err := pc.backendconn.Close(); err != nil {
-				log.Printf("[%s] error closing backend connection: %v", clientAddr, err)
-			}
+
+		// release pool connection back to pool
+
+		if pc.poolConn != nil {
+			pc.poolConn.Release()
+			log.Printf("[%s] released connection back to pool", clientAddr)
 		}
 		log.Printf("[%s] connection closed", clientAddr)
 	}()
@@ -204,15 +221,18 @@ func (pc *gprxyConn) handleStartupMessage(pgconn *pgproto3.Backend) error {
 
 		// 1. Connect to the backend PostgreSQL server
 		start := time.Now()
-		backendConnection, err := pc.connectBackend(database, user)
+		err := pc.connectBackend(database, user)
 		if err != nil {
 			log.Printf("[%s] failed to connect to backend: %v", clientAddr, err)
 			return pc.sendErrorToClient(pgconn, "Database unavailable")
 		}
 		log.Printf("[%s] backend connection established in %v", clientAddr, time.Since(start))
 
+		// Get the underlying net conn connection from pgpool connection for protocol communication
+		underlyingConn := pc.poolConn.Conn().PgConn().Conn()
+
 		// 2. Frontend to communicate with backend
-		bf := pgproto3.NewFrontend(pgproto3.NewChunkReader(backendConnection), backendConnection)
+		bf := pgproto3.NewFrontend(pgproto3.NewChunkReader(underlyingConn), underlyingConn)
 
 		// 3. Forward startup message to backend
 		err = bf.Send(msg)
@@ -229,9 +249,9 @@ func (pc *gprxyConn) handleStartupMessage(pgconn *pgproto3.Backend) error {
 			return err
 		}
 
-		pc.backendconn = backendConnection
 		pc.bf = bf
 		pc.user = user // Store user for logging
+		pc.db = database
 
 	case *pgproto3.SSLRequest:
 		log.Printf("[%s] SSL request received, rejecting (not implemented)", clientAddr)
@@ -249,13 +269,43 @@ func (pc *gprxyConn) handleStartupMessage(pgconn *pgproto3.Backend) error {
 	return nil
 }
 
-func (pc *gprxyConn) connectBackend(database, user string) (net.Conn, error) {
-	backendAddr := pc.addr + ":5432"
-	conn, err := net.DialTimeout("tcp", backendAddr, 10*time.Second)
+func (pc *gprxyConn) connectBackend(database, user string) error {
+	// backendAddr := pc.addr + ":5432"
+	// conn, err := net.DialTimeout("tcp", backendAddr, 10*time.Second)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to connect to backend %s: %w", backendAddr, err)
+	// }
+	// return conn, nil
+	connPool, err := pc.getOrCreatePool(database)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to backend %s: %w", backendAddr, err)
+		return fmt.Errorf("error while creating connection to the database")
+
 	}
-	return conn, nil
+
+	// Acquire a connection from the pool
+	connection, err := connPool.Acquire(context.Background())
+	if err != nil {
+		return fmt.Errorf("error while acquiring connection from the database pool")
+
+	}
+	// Test connection
+	err = connection.Ping(context.Background())
+	if err != nil {
+		return fmt.Errorf("could not ping database")
+
+	}
+	pc.poolConn = connection
+	log.Printf("[%s] acquired connection from pool for database: %s", pc.addr, database)
+
+	stats := connPool.Stat()
+	fmt.Println("Total Connections:", stats.TotalConns())
+	fmt.Println("Acquired Connections:", stats.AcquiredConns())
+	fmt.Println("Acquired Count:", stats.AcquireCount())
+	fmt.Println("Acquired Duration:", stats.AcquireDuration())
+	fmt.Println("Acquired Constructing:", stats.ConstructingConns())
+	fmt.Println("Idle Connections:", stats.IdleConns())
+	return nil
+
 }
 
 func (pc *gprxyConn) sendErrorToClient(cb *pgproto3.Backend, msg string) error {
@@ -335,4 +385,79 @@ func (pc *gprxyConn) needsClientResponse(msg pgproto3.BackendMessage) bool {
 	default:
 		return false
 	}
+}
+
+func (pc *gprxyConn) getOrCreatePool(database string) (*pgxpool.Pool, error) {
+
+	const defaultMaxConns = int32(7)
+	const defaultMinConns = int32(0)
+	const defaultMaxConnLifetime = time.Hour
+	const defaultMaxConnIdleTime = time.Minute * 30
+	const defaultHealthCheckPeriod = time.Minute
+	const defaultConnectTimeout = time.Second * 5
+
+	poolMutex.RLock() // read lock for go routines trying to read the pool
+	pool, exists := poolManager[database]
+	poolMutex.RUnlock()
+
+	if exists {
+		return pool, nil
+	}
+
+	poolMutex.Lock()
+	defer poolMutex.Unlock()
+
+	// checking to see if it exists
+
+	if pool, exists := poolManager[database]; exists {
+		return pool, nil
+	}
+
+	// else if it does not exist then
+
+	connectionString := pc.buildConnectionString(database)
+	config, err := pgxpool.ParseConfig(connectionString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	config.MaxConns = defaultMaxConns
+	config.MinConns = defaultMinConns
+	config.MaxConnLifetime = defaultMaxConnLifetime
+	config.MaxConnIdleTime = defaultMaxConnIdleTime
+	config.HealthCheckPeriod = defaultHealthCheckPeriod
+	config.ConnConfig.ConnectTimeout = defaultConnectTimeout
+
+	pool, err = pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pool: %w", err)
+	}
+	poolManager[database] = pool
+	log.Printf("Created a new connection pool for database: %s", database)
+	return pool, nil
+
+}
+func (pc *gprxyConn) buildConnectionString(database string) string {
+	serviceUser := os.Getenv("GPRXY_USER")
+	servicePass := os.Getenv("GPRXY_PASS")
+	host := pc.addr
+	port := "5432"
+	db := database
+	if serviceUser == "" {
+		log.Fatal("GPRXY_USER environment variable is required")
+	}
+	if servicePass == "" {
+		log.Fatal("GPRXY_PASS environment variable is required")
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return fmt.Sprintf(
+		"postgres://%s:%s@%s:%s/%s",
+		serviceUser,
+		servicePass,
+		host,
+		port,
+		db,
+	)
 }
