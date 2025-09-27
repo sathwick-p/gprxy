@@ -219,9 +219,16 @@ func (pc *gprxyConn) handleStartupMessage(pgconn *pgproto3.Backend) error {
 		// For now, accept all user requests and blindly send request to the backend
 		// not doing custom auth, auth will be taken care by pg_hba.conf
 
-		// 1. Connect to the backend PostgreSQL server
+		// 1. Authenticate user with postgresql first
+		err := pc.authUserWithPSQL(user, database, msg, pgconn)
+		if err != nil {
+			log.Printf("[%s] authentication failed for user %s: %v", clientAddr, user, err)
+			return err
+		}
+		log.Printf("[%s] user %s authenticated successfully", clientAddr, user)
+		// 2. Connect to the backend PostgreSQL server
 		start := time.Now()
-		err := pc.connectBackend(database, user)
+		err = pc.connectBackend(database, user)
 		if err != nil {
 			log.Printf("[%s] failed to connect to backend: %v", clientAddr, err)
 			return pc.sendErrorToClient(pgconn, "Database unavailable")
@@ -231,24 +238,8 @@ func (pc *gprxyConn) handleStartupMessage(pgconn *pgproto3.Backend) error {
 		// Get the underlying net conn connection from pgpool connection for protocol communication
 		underlyingConn := pc.poolConn.Conn().PgConn().Conn()
 
-		// 2. Frontend to communicate with backend
+		// 3. Setup query forwarding
 		bf := pgproto3.NewFrontend(pgproto3.NewChunkReader(underlyingConn), underlyingConn)
-
-		// 3. Forward startup message to backend
-		err = bf.Send(msg)
-		if err != nil {
-			log.Printf("[%s] failed to send startup message to backend: %v", clientAddr, err)
-			return pc.sendErrorToClient(pgconn, "Backend connection failed")
-		}
-
-		// 4. Authentication flow
-		log.Printf("[%s] starting authentication flow", clientAddr)
-		err = pc.relayAuthFlow(pgconn, bf)
-		if err != nil {
-			log.Printf("[%s] authentication flow failed: %v", clientAddr, err)
-			return err
-		}
-
 		pc.bf = bf
 		pc.user = user // Store user for logging
 		pc.db = database
@@ -269,6 +260,43 @@ func (pc *gprxyConn) handleStartupMessage(pgconn *pgproto3.Backend) error {
 	return nil
 }
 
+func (pc *gprxyConn) authUserWithPSQL(user, database string, startUpMessage *pgproto3.StartupMessage, clientBackend *pgproto3.Backend) error {
+	clientAddr := pc.conn.RemoteAddr().String()
+
+	// Create temp connection for authentication
+	backendAddress := pc.addr + ":5432"
+	log.Printf("[%s] connecting to PostgreSQL at %s for authentication", clientAddr, backendAddress)
+
+	tempConnection, err := net.DialTimeout("tcp", backendAddress, 10*time.Second)
+	if err != nil {
+		log.Printf("[%s] failed to connect to PostgreSQL: %v", clientAddr, err)
+		return pc.sendErrorToClient(clientBackend, "Backend Unavailable")
+	}
+	defer tempConnection.Close()
+
+	// Create frontend for temp connection
+	tempFrontend := pgproto3.NewFrontend(pgproto3.NewChunkReader(tempConnection), tempConnection)
+
+	// Send startup message to PostgreSQL
+	log.Printf("[%s] sending startup message to PostgreSQL", clientAddr)
+	err = tempFrontend.Send(startUpMessage)
+	if err != nil {
+		log.Printf("[%s] failed to send startup message: %v", clientAddr, err)
+		return pc.sendErrorToClient(clientBackend, "Authentication failed")
+	}
+
+	// Run authentication flow
+	log.Printf("[%s] starting authentication relay", clientAddr)
+	err = pc.relayAuthFlow(clientBackend, tempFrontend)
+	if err != nil {
+		log.Printf("[%s] authentication relay failed: %v", clientAddr, err)
+		return err
+	}
+
+	log.Printf("[%s] authentication completed successfully", clientAddr)
+	return nil
+}
+
 func (pc *gprxyConn) connectBackend(database, user string) error {
 	// backendAddr := pc.addr + ":5432"
 	// conn, err := net.DialTimeout("tcp", backendAddr, 10*time.Second)
@@ -278,34 +306,29 @@ func (pc *gprxyConn) connectBackend(database, user string) error {
 	// return conn, nil
 	connPool, err := pc.getOrCreatePool(database)
 	if err != nil {
-		return fmt.Errorf("error while creating connection to the database")
-
+		return fmt.Errorf("error while creating connection to the database: %w", err)
 	}
 
 	// Acquire a connection from the pool
 	connection, err := connPool.Acquire(context.Background())
 	if err != nil {
-		return fmt.Errorf("error while acquiring connection from the database pool")
-
+		return fmt.Errorf("error while acquiring connection from the database pool: %w", err)
 	}
+
 	// Test connection
 	err = connection.Ping(context.Background())
 	if err != nil {
-		return fmt.Errorf("could not ping database")
-
+		connection.Release() // Release on error
+		return fmt.Errorf("could not ping database: %w", err)
 	}
+
 	pc.poolConn = connection
 	log.Printf("[%s] acquired connection from pool for database: %s", pc.addr, database)
 
 	stats := connPool.Stat()
-	fmt.Println("Total Connections:", stats.TotalConns())
-	fmt.Println("Acquired Connections:", stats.AcquiredConns())
-	fmt.Println("Acquired Count:", stats.AcquireCount())
-	fmt.Println("Acquired Duration:", stats.AcquireDuration())
-	fmt.Println("Acquired Constructing:", stats.ConstructingConns())
-	fmt.Println("Idle Connections:", stats.IdleConns())
+	log.Printf("Pool stats - Total: %d, Acquired: %d, Idle: %d",
+		stats.TotalConns(), stats.AcquiredConns(), stats.IdleConns())
 	return nil
-
 }
 
 func (pc *gprxyConn) sendErrorToClient(cb *pgproto3.Backend, msg string) error {
@@ -314,7 +337,16 @@ func (pc *gprxyConn) sendErrorToClient(cb *pgproto3.Backend, msg string) error {
 		Code:     "08006",
 		Message:  msg,
 	}
-	return cb.Send(errMsg)
+	err := cb.Send(errMsg)
+	if err != nil {
+		return fmt.Errorf("failed to send error to client: %w", err)
+	}
+	ready := pgproto3.ReadyForQuery{TxStatus: 'I'}
+	err = cb.Send(&ready)
+	if err != nil {
+		return fmt.Errorf("failed to send ready to client: %w", err)
+	}
+	return fmt.Errorf(msg)
 }
 
 // relayAuthFlow handles the authentication conversation between client and backend
@@ -326,7 +358,7 @@ func (pc *gprxyConn) relayAuthFlow(cb *pgproto3.Backend, bf *pgproto3.Frontend) 
 		msg, err := bf.Receive()
 		if err != nil {
 			// Proxy error, can't communicate with backend
-			return pc.sendErrorToClient(cb, "Lost connection to backend")
+			return fmt.Errorf("lost connection to backend: %w", err)
 		}
 
 		// Forward backend's message to the client - either error or success
