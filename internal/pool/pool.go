@@ -10,22 +10,31 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type poolKey struct {
+	user     string
+	database string
+}
+
 var (
-	poolManager = make(map[string]*pgxpool.Pool)
+	poolManager = make(map[poolKey]*pgxpool.Pool)
 	poolMutex   sync.RWMutex
 )
 
 // GetOrCreatePool returns an existing pool or creates a new one for the given database
-func GetOrCreatePool(database, connectionString string) (*pgxpool.Pool, error) {
-	const defaultMaxConns = int32(7)
+func GetOrCreatePool(user, database, connectionString string) (*pgxpool.Pool, error) {
+	const defaultMaxConns = int32(5)
 	const defaultMinConns = int32(0)
 	const defaultMaxConnLifetime = time.Hour
 	const defaultMaxConnIdleTime = time.Minute * 30
 	const defaultHealthCheckPeriod = time.Minute
 	const defaultConnectTimeout = time.Second * 5
 
+	key := poolKey{
+		user:     user,
+		database: database,
+	}
 	poolMutex.RLock() // read lock for go routines trying to read the pool
-	pool, exists := poolManager[database]
+	pool, exists := poolManager[key]
 	poolMutex.RUnlock()
 
 	if exists {
@@ -36,7 +45,7 @@ func GetOrCreatePool(database, connectionString string) (*pgxpool.Pool, error) {
 	defer poolMutex.Unlock()
 
 	// checking to see if it exists (double-check pattern)
-	if pool, exists := poolManager[database]; exists {
+	if pool, exists := poolManager[key]; exists {
 		return pool, nil
 	}
 
@@ -57,14 +66,14 @@ func GetOrCreatePool(database, connectionString string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pool: %w", err)
 	}
-	poolManager[database] = pool
+	poolManager[key] = pool
 	log.Printf("Created a new connection pool for database: %s", database)
 	return pool, nil
 }
 
-// AcquireConnection acquires a connection from the pool for the given database
-func AcquireConnection(database, connectionString string) (*pgxpool.Conn, error) {
-	pool, err := GetOrCreatePool(database, connectionString)
+// AcquireConnection acquires a connection from the pool for the given database and user
+func AcquireConnection(user, database, connectionString string) (*pgxpool.Conn, error) {
+	pool, err := GetOrCreatePool(user, database, connectionString)
 	if err != nil {
 		return nil, fmt.Errorf("error while creating connection to the database: %w", err)
 	}
@@ -86,17 +95,22 @@ func AcquireConnection(database, connectionString string) (*pgxpool.Conn, error)
 }
 
 // LogPoolStats logs statistics for the given database pool
-func LogPoolStats(database string) {
+func LogPoolStats(user, database string) {
+
+	key := poolKey{
+		user:     user,
+		database: database,
+	}
 	poolMutex.RLock()
-	pool, exists := poolManager[database]
+	pool, exists := poolManager[key]
 	poolMutex.RUnlock()
 
 	if !exists {
-		log.Printf("No pool found for database: %s", database)
+		log.Printf("No pool found for user %s and database: %s", user, database)
 		return
 	}
 
 	stats := pool.Stat()
-	log.Printf("Pool stats - Total: %d, Acquired: %d, Idle: %d",
+	log.Printf("Pool stats for [%s,%s]- Total: %d, Acquired: %d, Idle: %d", user, database,
 		stats.TotalConns(), stats.AcquiredConns(), stats.IdleConns())
 }

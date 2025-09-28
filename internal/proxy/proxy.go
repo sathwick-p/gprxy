@@ -161,7 +161,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) error {
 func (pc *Connection) connectBackend(database, user string) error {
 	connectionString := pc.config.BuildConnectionString(database)
 
-	connection, err := pool.AcquireConnection(database, connectionString)
+	connection, err := pool.AcquireConnection(user, database, connectionString)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func (pc *Connection) connectBackend(database, user string) error {
 	pc.poolConn = connection
 	log.Printf("[%s] acquired connection from pool for database: %s", pc.config.Host, database)
 
-	pool.LogPoolStats(database)
+	pool.LogPoolStats(user, database)
 	return nil
 }
 

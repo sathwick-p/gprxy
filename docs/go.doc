@@ -1,0 +1,7 @@
+- Multiple pools (per database/role)
+  - Instead of a single proxy user with global rights, you spin up a `pgxpool` per client role.
+  - Each pool connects to Postgres with the real DB user credentials.
+  - Then you keep the permission separation intact, but at the cost of more pools and more connections.
+
+
+So this was my plan to implement and i may have forgottten about a little thing for iplementting this i would have to change the flow the pool connetion was working and also after authentication im basically storing the pass in a map of user pass and building connection string with that to make a connection pool the user can user for that particular db, not really sure if this is the correct way of doing things but wish me luck
