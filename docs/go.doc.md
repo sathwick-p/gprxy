@@ -448,3 +448,658 @@ Client → handleMessage() → Backend → relayBackendResponse() → Client
 │  }                                      │
 └─────────────────────────────────────────┘
 ```
+
+# Changelog - 26/09/25
+
+Today my goal was to implement connection pooling and then SSL request and cancelling request, and I thought it would be easy af as it is already a well-defined `pgxpool` library — but it wasn't easy at all. Let's get into it.
+
+### What `pgxpool` provides
+
+- It lives inside your Go process.
+- It maintains a pool of physical connections to Postgres.
+- When you `pool.Acquire(ctx)`, you get a dedicated backend connection from the pool.
+- You hold that connection until you `Release()` it.
+- During that time, no other goroutine can use that same physical connection.
+
+The problem here is that it does not do transactional pooling — where the pooled connection is based on the transaction and held only for one transaction. The proxy only gives you a physical connection for the duration of a transaction.
+
+- After `COMMIT` / `ROLLBACK`, the backend connection is returned to the pool.
+- The next client transaction might reuse the same backend.
+- Or statement pooling is pooling for each statement.
+
+So the pooling that `pgxpool` provides is basically a client-side pooling.
+
+And since we are using goroutines here, I need to create a global connection pooling strategy so that each goroutine does not end up creating its own pool. I need to maintain the pool for the whole RDS instance.
+
+To do that, firstly we need to pass some config to the pool like max connections it can open, etc., and we have passed this config right now:
+
+```go
+const defaultMaxConns = int32(7)
+const defaultMinConns = int32(0)
+const defaultMaxConnLifetime = time.Hour
+const defaultMaxConnIdleTime = time.Minute * 30
+const defaultHealthCheckPeriod = time.Minute
+const defaultConnectTimeout = time.Second * 5
+```
+
+Then, since we can have multiple goroutines talking to a single connection pool, our logic has to be such that the first connection pool is created by the first goroutine that is started, and after that all the goroutines need to use the same connection pool and cannot create their own.
+
+To handle this, we will use mutexes as we cannot create a race condition between the goroutines if multiple are created at the same time — it would cause a race for the first one to create a pool.
+
+You want to keep a pool of connections per database name (`poolManager[database]`). Multiple goroutines may request a pool at the same time. You don’t want to create duplicate pools. You also don’t want to lock too aggressively (hurts performance).
+
+The pool manager is basically a `map[string]*pgxpool.Pool` that will get created for each DB:
+
+```go
+poolManager := map[string]*pgxpool.Pool{
+    "postgres":  pool1,  // Pool for 'postgres' database
+    "myapp_db":  pool2,  // Pool for 'myapp_db' database
+    "analytics": pool3,  // Pool for 'analytics' database
+}
+```
+
+#### Locking strategy (double-checked locking)
+
+- Step 1: Try fast read with `RLock`
+
+```go
+poolMutex.RLock()
+pool, exists := poolManager[database]
+poolMutex.RUnlock()
+
+if exists {
+    return pool, nil
+}
+```
+
+RLock allows multiple goroutines to read simultaneously. If the pool already exists, we return immediately. This makes the function very fast when pools are already created.
+
+- Step 2: Acquire write lock
+
+```go
+poolMutex.Lock()
+defer poolMutex.Unlock()
+```
+
+If the pool didn’t exist, we need to create one. For this, only one goroutine at a time can be in this section. `defer` ensures we always unlock when the function exits.
+
+- Step 3: Double-check (avoid duplicate work)
+
+```go
+if pool, exists := poolManager[database]; exists {
+    return pool, nil
+}
+```
+
+Why check again? Because another goroutine might have created the pool while we were waiting for the lock. Without this, we’d create multiple pools for the same database.
+
+- Step 4: Safe creation
+
+```go
+pool = pgxpool.New(...)
+poolManager[database] = pool
+return pool, nil
+```
+
+Now we’re the only goroutine holding the write lock. Safe to create a new pool and store it in the map. After this, all future calls will find it at Step 1.
+
+### `pgxpool` internals recap
+
+By default:
+
+- `min_conns = 0`
+- `max_conns = 4` (unless you set `pool_max_conns` in the connection string)
+
+When you `pool.Acquire(ctx)`, it either:
+
+- Hands you an existing connection from the pool (if available), or
+- Creates a new connection (if under `max_conns`), or
+- Waits until a connection is free (if at capacity).
+
+So, verifying it means proving:
+
+- Multiple goroutines share fewer DB connections than goroutines.
+- Connections are reused instead of re-created each time.
+
+Once this is done, the pool is created successfully. When the backend needs to connect to the Postgres server, it needs to open a connection to the DB, and this is done via the `AcquireConnection()` where it acquires a connection via the `Acquire()` function from `pgxpool` and returns that connection to the connect function.
+
+### Temporary vs pooled connections for auth
+
+Once the proxy needs to connect to the backend, there is a bit of a complicated process that happens here because of a certain race condition.
+
+The proxy needs some service account user creds for the proxy to connect to the backend and make a connection pool.
+
+- Pool creates connection → Authenticates as `GPRXY_USER`
+- But the issue is that when you use `pgxpool`, the connection is already authenticated and established at the pool level using your service user credentials. But then you're trying to run the authentication flow again with the client's credentials over an already-authenticated connection.
+
+So the best practice in this scenario is:
+
+- Pool connections authenticate as a service user
+- The proxy forwards the authentication to PostgreSQL and handles it properly
+- If auth succeeds and since it's the first goroutine, it creates a pool
+
+Flow:
+
+- Client connects → "I'm alice with password xyz123"
+- Proxy creates temp connection → Forwards to PostgreSQL
+- PostgreSQL validates → "Password correct" or "Password wrong"
+- If auth succeeds → Proxy gets pooled connection for queries
+- If auth fails → Connection rejected
+
+So the code would basically be like:
+
+```go
+// 1. Create a TEMPORARY connection for authentication
+tempConn, err := pc.createTempConnection(database, user)
+if err != nil {
+    return pc.sendErrorToClient(pgconn, "Database unavailable")
+}
+defer tempConn.Close()
+
+// 2. Run FULL authentication flow with PostgreSQL
+err = pc.AuthenticateUser(pgconn, tempConn, msg)
+if err != nil {
+    return err // Authentication failed
+}
+
+// 3. ONLY after successful auth, get pooled connection
+err = pc.connectBackend(database, user)
+if err != nil {
+    return pc.sendErrorToClient(pgconn, "Database unavailable")
+}
+
+// 4. Set up for query forwarding
+underlyingConn := pc.poolConn.Conn().PgConn().Conn()
+pc.bf = pgproto3.NewFrontend(pgproto3.NewChunkReader(underlyingConn), underlyingConn)
+```
+
+Later, for me to implement custom authentication as well, it would be similar where the first authentication I would have to handle via:
+
+```go
+// AWS RDS Proxy approach - custom authentication
+func (pc *gprxyConn) authenticateWithIAM(user, token string) error {
+    // Validate IAM token
+    return aws.ValidateIAMToken(user, token)
+}
+```
+
+So the service user I have set up currently is the `postgres` user directly, which is the superuser, but ideally it should be a user following least-privilege principle.
+
+### Debugging auth failure and SASL
+
+Now after writing all this code I wanted to start testing the proxy on whether everything is working as expected, and this is where I face my next big challenge for which I have to write code tomorrow.
+
+I was getting this error log saying:
+
+```
+received from PostgreSQL: *pgproto3.AuthenticationSASL
+unknown message type: *pgproto3.AuthenticationSASL
+waiting for client response
+forwarding client response: *pgproto3.PasswordMessage
+received from PostgreSQL: *pgproto3.ErrorResponse
+PostgreSQL auth error: insufficient data left in message
+```
+
+And with this the password auth failed for the `postgres` user multiple times, whereas I'm able to connect normally without the proxy.
+
+Digging deeper, I understood and found out that there is an encryption method that is used by the Postgres DB to encrypt the passwords and this by default is `scram-sha-256`.
+
+- PostgreSQL 17 uses SCRAM-SHA-256 (SASL) by default, not MD5
+- Your proxy didn't recognize `AuthenticationSASL` as a valid message type
+- Client was sending wrong response format for SASL authentication
+
+So I thought I need to add SASL support and authentication as well, and the backend will handle it as expected.
+
+To verify this, I created a dummy user to check if it would work as expected:
+
+```sql
+SET password_encryption = 'md5';
+CREATE USER testuser WITH PASSWORD 'testpass';
+GRANT ALL PRIVILEGES ON DATABASE postgres TO testuser;
+```
+
+And lo behold, when I connect with this:
+
+```bash
+psql "postgresql://testuser@localhost:7777/postgres"
+```
+
+the password auth worked fine and I was in the DB without any errors. So now we know that this was the actual issue.
+
+The difference is in when and how the passwords were created:
+
+- `postgres` user: Created with SCRAM-SHA-256 password hash (before we changed settings)
+- `testuser`: Created with MD5 password hash (after we set `password_encryption = 'md5'`)
+
+Even though `SHOW password_encryption` shows `scram-sha-256` for both users, that's the current setting, not how their existing passwords are stored.
+
+So the obvious solutions here were to default every user to use MD5 or add SASL support to my proxy — and obviously I cannot change the default Postgres DB config for everything; that would defeat the purpose — so I have to add SASL support now.
+
+But our main issue in the code was that the problem is not with the proxy — it's with the client–proxy interaction. Here's what's happening:
+
+- PostgreSQL → Proxy: "Use SCRAM-SHA-256 authentication"
+- Proxy → Client: Forwards the SASL request
+- Client → Proxy: Sends simple `PasswordMessage` (wrong!)
+- Proxy → PostgreSQL: Forwards the wrong message type
+- PostgreSQL: "This isn't a SASL message!" → Error
+
+So we had to intercept the client's password message and convert it to proper SASL messages — I'm fully confused right now, will continue this tomorrow.
+
+---
+
+# Changelog - 27/09/25
+
+Okay so what is currently happening is that:
+
+1. Client "postgres" authenticates →  Authentication succeeds
+2. Proxy gets pooled connection as "testuser" → Connection established
+3. Client runs: `SELECT * FROM users` → Executed as "testuser" 
+4. Database sees: "testuser ran this query" (not "postgres")
+
+### The Problem
+
+- Authentication: Client proves they are "postgres"
+- Authorization: All queries run as "testuser"
+- Audit logs: Show "testuser" performed all actions
+- Row-level security: Applied based on "testuser", not "postgres"
+
+### The Complete Flow — What's Actually Happening
+
+#### Phase 1: Client Authentication (Temporary Connection)
+
+```
+1. Client connects as "testuser" → Proxy
+2. Proxy → PostgreSQL (temp connection): "I'm testuser with password"
+3. PostgreSQL → Proxy: "testuser authenticated successfully"
+4. Proxy → Client: "Authentication OK"
+5. Temp connection closed
+```
+
+#### Phase 2: Service User Connection (Pool Connection)
+
+```
+1. Proxy calls connectBackend()
+2. Uses config.BuildConnectionString() → "postgres://testuser:testpass@localhost:5432/cloudfront_data"
+3. Pool creates connection as "testuser" (service user)
+4. All subsequent queries use this service user connection
+```
+
+### The Issues You're Facing
+
+#### Issue 1: User Identity Confusion
+
+```go
+// In your logs, you see:
+parameter status - session_authorization: testuser
+```
+
+Problem: Both client and service user are "testuser", so you can't see the separation!
+
+#### Issue 2: No Real User Identity Preservation
+
+```go
+// Line 141: Client user stored for logging only
+pc.user = user // Store user for logging
+
+// Lines 188, 191, etc: Queries logged with client user
+log.Printf("[%s] [%s] QUERY: %s", clientAddr, pc.user, query.String)
+```
+
+Problem: Queries are logged as client user but executed as service user!
+
+#### Issue 3: Authentication vs Operation Identity Mismatch
+
+When different users connect:
+
+```
+Client "postgres" → Authenticates as "postgres" 
+But queries execute as "testuser" (service user) 
+```
+
+### Detailed Service User Usage Trace
+
+#### Step-by-Step Service User Flow
+
+1. Startup: `config.Load()` reads `GPRXY_USER=testuser` from `.env`
+2. Client connects: Authentication happens with client credentials (temporary)
+3. Backend connection: `connectBackend()` called
+4. Connection string built: `postgres://testuser:testpass@localhost:5432/cloudfront_data`
+5. Pool connection: All connections created as `testuser`
+6. Query execution: All SQL runs as `testuser`
+
+#### Evidence from Your Logs
+
+```
+Created a new connection pool for database: cloudfront_data  ← Service user pool
+[localhost] acquired connection from pool for database: cloudfront_data  ← Service user connection
+Pool stats - Total: 1, Acquired: 1, Idle: 0  ← Service user pool stats
+```
+
+No — `pgxpool` does not preserve the identity of the client user. All queries run under the database user that you used in the pool’s connection string.
+
+So:
+
+- The Go client → connects to `pgxpool` with one database user/password (e.g. `postgres` or `app_user`).
+- Every query executed through `pgxpool` runs as that same user.
+- The application user identity (who triggered the query) is not automatically visible to PostgreSQL.
+
+Why?
+
+- `pgxpool` is client-side pooling (inside your Go app).
+- It keeps a pool of backend connections already authenticated as the configured DB user.
+- When your app needs a connection, it borrows one from the pool — no new DB login/auth happens.
+- This makes pooling fast, but it means Postgres only ever sees one user identity (the one in the DSN).
+
+#### Comparison with Other Approaches
+
+- `pgbouncer` in transaction pooling: Same — you lose per-app user identity. Everything runs as the configured user.
+- `pgbouncer` in session pooling: Preserves session user identity, but still usually one DB user for performance.
+- RDS Proxy with IAM auth: Can map IAM identities to DB users, so the DB might see different users per connection.
+
+#### What happens today (`pgxpool` default)
+
+You initialized your pool with one DSN (e.g. `postgres://proxy_user:secret@localhost:5432/postgres`). Every connection in that pool is logged in as `proxy_user`. No matter who your client is, when a query goes to Postgres it’s run as `proxy_user`. That’s why user identities aren’t preserved automatically.
+
+If you run `pgxpool` in the default mode, the proxy user is the only identity that PostgreSQL will see. That means:
+
+- This user must have all the privileges required by the client queries you expect to relay.
+- Clients themselves are authenticated at the proxy level, not at Postgres.
+- The proxy user effectively acts as a service account or super-app user.
+
+So, for example:
+
+- If your proxy serves users that only read from tables → the proxy user must have `SELECT` on those tables.
+- If your proxy needs to insert/update/delete → it needs `INSERT/UPDATE/DELETE`.
+- If you want it to “act on behalf” of other users → it needs `SET ROLE` or `SET SESSION AUTHORIZATION` rights.
+- If the proxy should bypass all restrictions → make it a superuser (not recommended for production).
+
+👉 In short: the proxy user needs the union of all permissions required by the workloads it will serve.
+
+But this is not safe at all for my purpose, as I have separated client-based users with client-based DBs and I don’t think it would float with the compliance part of it as well.
+
+When a client connects through your proxy, their actual Postgres username/password is not used anymore. Instead, your proxy process opens connections to Postgres using one fixed role (the proxy user).
+
+This means:
+
+- All queries on the database are executed as the proxy user.
+- Any per-user database permissions/separation you had before is lost.
+- If your proxy user has access to multiple databases/schemas, then by definition, the proxy process can query them — even if the original client shouldn’t.
+
+So yes, you’re right: unless you implement extra checks in your proxy code, your proxy user can “see too much.”
+
+### How production systems handle this
+
+- Application-level separation
+  - You enforce which database/schema a given client can touch inside your proxy.
+  - Example: client connects with their app credentials → your proxy maps them to a certain DB/schema → proxy user only runs queries in that scope.
+  - Downside: Postgres itself no longer enforces per-user security — you’re responsible.
+
+- Multiple pools (per database/role)
+  - Instead of a single proxy user with global rights, you spin up a `pgxpool` per client role.
+  - Each pool connects to Postgres with the real DB user credentials.
+  - Then you keep the permission separation intact, but at the cost of more pools and more connections.
+
+- Use a connection pooler that supports transaction-pooling + auth (like PgBouncer in `auth_user` mode)
+  - PgBouncer can preserve client identity for authentication and enforce role separation, even while pooling.
+
+These are my above options to fix it and I think the best option for me is to create DB pools based on user connection — in my k8s setup as well, 12 pods use the same user and let’s say each makes one connection — if the DB is pooled per user, it also provides good enough pooling advantages.
+
+Or maybe I can do both actually with a flag or something that triggers behavior like that.
+
+### Why creating a pool per user is better
+
+- Preserves database-level permissions
+  - Each pool connects using the actual client’s DB user credentials.
+  - Postgres enforces that user’s access automatically — no need for your proxy to implement extra checks.
+  - If `user1` only has access to `db1`, they cannot touch `db2` even though the proxy exists.
+
+- Transparency
+  - Postgres sees the real client identity in `pg_stat_activity`, logs, and RLS policies.
+  - Easier to audit.
+
+- Safety
+  - Even if there’s a bug in your proxy, the proxy can’t escalate privileges because it’s not using a superuser or global pool account.
+
+#### Trade-offs
+
+- Resource usage
+  - Each pool maintains connections. If you have many users, you can quickly exhaust Postgres’s `max_connections`.
+  - Example: 100 users × 10 connections per pool = 1,000 backend connections.
+
+- Complexity
+  - You need to manage a map of pools keyed by username.
+  - Handle creation, reuse, and cleanup of pools dynamically.
+
+- Idle connections
+  - You may have idle connections for users who aren’t active.
+  - Could be mitigated with proper pool config (`MaxConns`, `MinConns`, idle timeout).
+
+### SCRAM vs MD5 — the exact issue and solution direction
+
+Perfect! I've identified the exact issue. Let me explain what's happening and provide detailed solutions.
+
+#### The Issue: SCRAM-SHA-256 vs MD5 Authentication Mismatch
+
+##### What's Happening in Your Logs
+
+```
+connection request - user: testuser3, database: cloudfront_data, app: psql
+connecting to PostgreSQL at localhost:5432 for authentication
+starting authentication relay
+authentication failed - severity: FATAL, code: 08P01, message: insufficient data left in message
+```
+
+##### Root Cause Analysis
+
+1. Password Storage Format
+
+When you created `testuser3` without setting `password_encryption = 'md5'`:
+
+```sql
+-- This creates SCRAM-SHA-256 password hash
+CREATE USER testuser3 WITH PASSWORD 'testpass3';
+```
+
+Result: Password stored as `SCRAM-SHA-256$4096:...` (not `md5...`).
+
+2. Authentication Method Selection
+
+PostgreSQL determines authentication method based on stored password format:
+
+```
+testuser3 password → SCRAM-SHA-256 format → PostgreSQL sends AuthenticationSASL
+```
+
+3. Protocol Mismatch
+
+Your proxy's authentication flow:
+
+```
+1. PostgreSQL → Proxy: "Use SCRAM-SHA-256 authentication" (AuthenticationSASL)
+2. Proxy → Client: Forwards SASL request
+3. Client → Proxy: Sends PasswordMessage (simple password)
+4. Proxy → PostgreSQL: Forwards PasswordMessage
+5. PostgreSQL: "This isn't a SASL message!" → Error: "insufficient data left in message"
+```
+
+#### Detailed Technical Explanation
+
+##### The Protocol Flow Breakdown
+
+Expected SASL Flow:
+
+```
+PostgreSQL → AuthenticationSASL(mechanisms: [SCRAM-SHA-256])
+Client → SASLInitialResponse(mechanism: SCRAM-SHA-256, data: client_first_message)
+PostgreSQL → AuthenticationSASLContinue(server_first_message)
+Client → SASLResponse(client_final_message)
+PostgreSQL → AuthenticationSASLFinal(server_final_message)
+PostgreSQL → AuthenticationOk
+```
+
+What Actually Happens:
+
+```
+PostgreSQL → AuthenticationSASL(mechanisms: [SCRAM-SHA-256])
+Client → PasswordMessage(password: "testpass3")  ← WRONG MESSAGE TYPE!
+PostgreSQL → ErrorResponse("insufficient data left in message")
+```
+
+Why "insufficient data left in message"?
+
+PostgreSQL expects a SASL message structure but receives a simple password message. The SASL parser tries to read SASL-specific fields that don't exist in a `PasswordMessage`, causing the parsing error.
+
+The solutions here are basically to either just use MD5 encryption (which would mean changing DB defaults, which I don't want to do), so obviously I'm going ahead with implementing SASL messages.
+
+Great, now let me analyze the current code and explain exactly what's happening and why it's failing.
+
+#### Current Code Analysis
+
+##### What Your Code Currently Does
+
+Your `relayAuthFlow` function follows this pattern:
+
+```
+1. Read message from PostgreSQL → msg
+2. IMMEDIATELY forward msg to client → cb.Send(msg)
+3. Check if client response needed → needsClientResponse(msg)
+4. If yes, get client response and forward to PostgreSQL
+```
+
+##### The Problem: Message Order Issue
+
+Here's the exact sequence that's causing the failure:
+
+```
+1. PostgreSQL → Proxy: AuthenticationSASL{mechanisms: ["SCRAM-SHA-256"]}
+2. Proxy → Client: AuthenticationSASL (forwarded immediately)
+3. Client → Proxy: PasswordMessage("testpass3") ← CLIENT SENDS WRONG MESSAGE TYPE!
+4. Proxy → PostgreSQL: PasswordMessage("testpass3")
+5. PostgreSQL: "Expected SASLInitialResponse, got PasswordMessage" → ERROR!
+```
+
+##### Why This Happens
+
+- The `psql` client behavior:
+  - When `psql` receives `AuthenticationSASL`, it should send `SASLInitialResponse`.
+  - But `psql` sometimes sends `PasswordMessage` instead (especially with simple password prompts).
+  - The proxy blindly forwards whatever the client sends.
+
+- PostgreSQL's expectation:
+  - PostgreSQL sent `AuthenticationSASL` → expects `SASLInitialResponse`.
+  - It gets `PasswordMessage` instead → tries to parse it as SASL → "insufficient data left in message".
+
+##### The Core Issue: No Protocol Translation
+
+The current code is a transparent relay — it forwards messages as-is without understanding or translating them.
+
+###### What You Have
+
+```go
+// Blind forwarding
+if needsClientResponse(msg) {
+    clientMsg, err := cb.Receive()  // Could be PasswordMessage
+    // ...
+    err = bf.Send(clientMsg)        // Forwards PasswordMessage to PostgreSQL
+}
+```
+
+###### What You Need
+
+```go
+// Protocol-aware handling
+switch pgMsg := msg.(type) {
+case *pgproto3.AuthenticationSASL:
+    // Handle SASL specifically
+    clientMsg := getClientResponse()
+
+    switch clientResponse := clientMsg.(type) {
+    case *pgproto3.PasswordMessage:
+        // Convert to SASLInitialResponse
+        saslMsg := convertPasswordToSASL(clientResponse.Password)
+        bf.Send(saslMsg)  // Send converted message
+    case *pgproto3.SASLInitialResponse:
+        // Forward as-is
+        bf.Send(clientMsg)
+    }
+}
+```
+
+##### Why You Need to Split Authentication Types
+
+Current problem: `needsClientResponse()` treats all auth types the same:
+
+```go
+case *pgproto3.AuthenticationMD5Password,      // Expects: PasswordMessage
+     *pgproto3.AuthenticationCleartextPassword, // Expects: PasswordMessage
+     *pgproto3.AuthenticationSASL,              // Expects: SASLInitialResponse ← DIFFERENT!
+     *pgproto3.AuthenticationSASLContinue,      // Expects: SASLResponse ← DIFFERENT!
+     *pgproto3.AuthenticationSASLFinal:         // Expects: No response ← DIFFERENT!
+    return true
+```
+
+Reality: Different auth types expect different message types:
+
+| PostgreSQL Sends | Client Should Send | Your Code Forwards |
+|------------------|-------------------|--------------------|
+| `AuthenticationMD5Password` | `PasswordMessage` | ✅ `PasswordMessage` |
+| `AuthenticationSASL` | `SASLInitialResponse` | ❌ `PasswordMessage` |
+| `AuthenticationSASLContinue` | `SASLResponse` | ❌ `PasswordMessage` |
+| `AuthenticationSASLFinal` | (Nothing) | ❌ Waits for response |
+
+##### The Message Discrepancy Source
+
+In your logs:
+
+```
+authentication failed - severity: FATAL, code: 08P01, message: insufficient data left in message
+```
+
+What PostgreSQL is doing (simplified):
+
+```c
+// PostgreSQL's SASL message parser (simplified)
+if (msgtype == 'p') {  // SASLInitialResponse expected
+    mechanism = read_string(msg);     // Tries to read mechanism name
+    data_len = read_int32(msg);       // Tries to read data length
+    data = read_bytes(msg, data_len); // Tries to read SASL data
+    // ERROR: PasswordMessage doesn't have this structure!
+}
+```
+
+PasswordMessage structure:
+
+```
+PasswordMessage: ['p'] [length] [password_string] [null_terminator]
+```
+
+SASLInitialResponse structure:
+
+```
+SASLInitialResponse: ['p'] [length] [mechanism_string] [null] [data_length] [sasl_data]
+```
+
+PostgreSQL tries to parse `PasswordMessage` as `SASLInitialResponse` → structure mismatch → parsing error!
+
+##### Why Your Current SASL Support Doesn't Work
+
+You have `AuthenticationSASL` in `needsClientResponse()`, but:
+
+1. No message type checking — you don't verify what the client actually sends.
+2. No protocol translation — you forward `PasswordMessage` when PostgreSQL expects `SASLInitialResponse`.
+3. No SASL conversation handling — SASL has multiple round trips (Initial → Continue → Final).
+
+##### The Solution
+
+You need protocol-aware authentication handling instead of blind message forwarding:
+
+```go
+switch authType := msg.(type) {
+case *pgproto3.AuthenticationSASL:
+    return handleSASLAuth(cb, bf, authType)  // SASL-specific logic
+case *pgproto3.AuthenticationMD5Password:
+    return handleMD5Auth(cb, bf, authType)   // MD5-specific logic
+}
+```
+
+This is why the split implementation is necessary — each authentication method has different message expectations and conversation flows that require specific handling logic. The current code assumes all auth methods work the same way (send request → get password → forward), but SASL is fundamentally different (multi-step conversation with specific message types).
