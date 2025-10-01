@@ -13,7 +13,7 @@ import (
 func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.StartupMessage, clientBackend *pgproto3.Backend, clientAddr string) error {
 	// Create temp connection for authentication
 	backendAddress := host + ":5432"
-	log.Printf("[%s] connecting to PostgreSQL at %s as %s for authentication", clientAddr, user, backendAddress)
+	log.Printf("[%s] connecting to PostgreSQL at %s as %s for authentication", clientAddr, backendAddress, user)
 
 	tempConnection, err := net.DialTimeout("tcp", backendAddress, 10*time.Second)
 	if err != nil {
@@ -32,6 +32,7 @@ func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.Star
 		log.Printf("[%s] failed to send startup message: %v", clientAddr, err)
 		return sendErrorToClient(clientBackend, "Authentication failed")
 	}
+	// No Flush available on pgproto3 Frontend; Send writes directly
 
 	// Run authentication flow
 	log.Printf("[%s] starting authentication relay", clientAddr)
@@ -55,11 +56,14 @@ func relayAuthFlow(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr strin
 			return fmt.Errorf("lost connection to backend: %w", err)
 		}
 
+		log.Printf("[%s] backend->client message: %T", clientAddr, msg)
+
 		// Forward backend's message to the client - either error or success
 		err = cb.Send(msg)
 		if err != nil {
 			return fmt.Errorf("failed to send to client: %w", err)
 		}
+		// No Flush on Backend; Send writes directly
 
 		switch message := msg.(type) {
 		case *pgproto3.ErrorResponse:
@@ -88,14 +92,17 @@ func relayAuthFlow(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr strin
 
 		// If backend needs client response, get passwords etc
 		if needsClientResponse(msg) {
+			log.Printf("[%s] awaiting client response for: %T", clientAddr, msg)
 			clientMsg, err := cb.Receive()
 			if err != nil {
 				return fmt.Errorf("client disconnected: %w", err)
 			}
+			log.Printf("[%s] client->backend message: %T", clientAddr, clientMsg)
 			err = bf.Send(clientMsg)
 			if err != nil {
 				return fmt.Errorf("backend error: %w", err)
 			}
+			// No Flush on Frontend; Send writes directly
 		}
 	}
 }
@@ -106,8 +113,7 @@ func needsClientResponse(msg pgproto3.BackendMessage) bool {
 	case *pgproto3.AuthenticationMD5Password,
 		*pgproto3.AuthenticationCleartextPassword,
 		*pgproto3.AuthenticationSASL,
-		*pgproto3.AuthenticationSASLContinue,
-		*pgproto3.AuthenticationSASLFinal:
+		*pgproto3.AuthenticationSASLContinue:
 		return true
 	default:
 		return false
@@ -125,10 +131,6 @@ func sendErrorToClient(cb *pgproto3.Backend, msg string) error {
 	if err != nil {
 		return fmt.Errorf("failed to send error to client: %w", err)
 	}
-	ready := pgproto3.ReadyForQuery{TxStatus: 'I'}
-	err = cb.Send(&ready)
-	if err != nil {
-		return fmt.Errorf("failed to send ready to client: %w", err)
-	}
+	// No Flush on Backend; Send writes directly
 	return fmt.Errorf("%s", msg)
 }

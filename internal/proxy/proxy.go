@@ -224,6 +224,7 @@ func (pc *Connection) handleMessage(client *pgproto3.Backend) error {
 	if err != nil {
 		return fmt.Errorf("unable to send query to backend: %w", err)
 	}
+	// No Flush available on pgproto3 Frontend; Send writes directly
 
 	// Handle termination
 	if _, ok := msg.(*pgproto3.Terminate); ok {
@@ -249,6 +250,7 @@ func (pc *Connection) relayBackendResponse(client *pgproto3.Backend) error {
 		if err != nil {
 			return fmt.Errorf("client send error: %w", err)
 		}
+		// No Flush available on pgproto3 Backend; Send writes directly
 
 		switch msgType := msg.(type) {
 		case *pgproto3.ReadyForQuery:
@@ -280,10 +282,6 @@ func (pc *Connection) sendErrorToClient(cb *pgproto3.Backend, msg string) error 
 	if err != nil {
 		return fmt.Errorf("failed to send error to client: %w", err)
 	}
-	ready := pgproto3.ReadyForQuery{TxStatus: 'I'}
-	err = cb.Send(&ready)
-	if err != nil {
-		return fmt.Errorf("failed to send ready to client: %w", err)
-	}
+	// No Flush available on pgproto3 Backend; Send writes directly
 	return fmt.Errorf("%s", msg)
 }

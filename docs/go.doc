@@ -6,3 +6,13 @@
 
 So this was my plan to implement and i may have forgottten about a little thing for iplementting this i would have to change the flow the pool connetion was working and also after authentication im basically storing the pass in a map of user pass and building connection string with that to make a connection pool the user can user for that particular db, not really sure if this is the correct way of doing things but wish me luck
 Again looking back on this approach this would never work, i tried it adn the reason it would never work is that the password is return with the md5 encryption or the SASL encrypted password and that cannot be used to make a connection string, plsu not to mention the security issue. not sure what the next approach needs to be. 
+
+
+Let me interpret your latest logs: on the first connection the server sent AuthenticationMD5Password, we forwarded it, and the client closed before sending a PasswordMessage (unexpected EOF). On the second connection, the client sent PasswordMessage and the full auth completed. So the proxy isn’t “sending no password” to Postgres in startup; Postgres asks for the password later (that’s how the protocol works). The first failure is the client closing before it replied with PasswordMessage.
+What’s going on
+The proxy opens a temp backend connection as soon as it gets the client’s StartupMessage. That’s necessary to get the server’s auth challenge (MD5/SASL).
+We forward that challenge to the client and then wait for a PasswordMessage.
+If the client closes (or restarts) before sending a PasswordMessage, you see “client disconnected: unexpected EOF.”
+In your second attempt, the client did send PasswordMessage and the handshake finished.
+
+
