@@ -13,7 +13,7 @@ import (
 func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.StartupMessage, clientBackend *pgproto3.Backend, clientAddr string) error {
 	// Create temp connection for authentication
 	backendAddress := host + ":5432"
-	log.Printf("[%s] connecting to PostgreSQL at %s for authentication", clientAddr, backendAddress)
+	log.Printf("[%s] connecting to PostgreSQL at %s as %s for authentication", clientAddr, user, backendAddress)
 
 	tempConnection, err := net.DialTimeout("tcp", backendAddress, 10*time.Second)
 	if err != nil {
@@ -76,7 +76,7 @@ func relayAuthFlow(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr strin
 			// Continue to receive more startup messages
 
 		case *pgproto3.BackendKeyData:
-			log.Printf("[%s] backend key data - process: %d, secret: %d",
+			log.Printf("[%s] backend key data - process_id: %d, secret_key: %d",
 				clientAddr, message.ProcessID, message.SecretKey)
 			// Continue to receive more startup messages
 
