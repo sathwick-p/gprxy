@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -17,34 +18,42 @@ import (
 
 // Connection represents a single client-proxy connection
 type Connection struct {
-	conn     net.Conn
-	config   *config.Config
-	poolConn *pgxpool.Conn
-	bf       *pgproto3.Frontend
-	user     string
-	db       string
+	conn      net.Conn
+	config    *config.Config
+	poolConn  *pgxpool.Conn
+	bf        *pgproto3.Frontend
+	user      string
+	db        string
+	tlsConfig *tls.Config
 }
 
 // Server represents the proxy server
 type Server struct {
-	config *config.Config
+	config    *config.Config
+	tlsConfig *tls.Config
 }
 
 // NewServer creates a new proxy server
-func NewServer(cfg *config.Config) *Server {
+func NewServer(cfg *config.Config, tls *tls.Config) *Server {
 	return &Server{
-		config: cfg,
+		config:    cfg,
+		tlsConfig: tls,
 	}
 }
 
 // Start starts the proxy server
 func (s *Server) Start() error {
+	// Start with plain TCP listener - TLS upgrade happens during PostgreSQL protocol
 	ln, err := net.Listen("tcp", s.config.Host+":"+s.config.Port)
 	if err != nil {
 		return fmt.Errorf("failed to start proxy server: %w", err)
 	}
 
-	log.Printf("PostgreSQL proxy listening on %s", ln.Addr())
+	tlsStatus := "disabled"
+	if s.tlsConfig != nil {
+		tlsStatus = "enabled"
+	}
+	log.Printf("PostgreSQL proxy listening on %s (TLS: %s)", ln.Addr(), tlsStatus)
 
 	for {
 		conn, err := ln.Accept()
@@ -54,8 +63,9 @@ func (s *Server) Start() error {
 		}
 
 		pc := &Connection{
-			conn:   conn,
-			config: s.config,
+			conn:      conn,
+			config:    s.config,
+			tlsConfig: s.tlsConfig,
 		}
 		go pc.handleConnection()
 	}
@@ -81,7 +91,8 @@ func (pc *Connection) handleConnection() {
 		log.Printf("[%s] connection closed", clientAddr)
 	}()
 
-	err := pc.handleStartupMessage(pgc)
+
+	pgc, err := pc.handleStartupMessage(pgc)
 	if err != nil {
 		log.Printf("[%s] startup failed: %v", clientAddr, err)
 		return
@@ -98,12 +109,12 @@ func (pc *Connection) handleConnection() {
 }
 
 // handleStartupMessage handles the initial client startup message
-func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) error {
+func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.Backend,error) {
 	clientAddr := pc.conn.RemoteAddr().String()
 
 	startupMessage, err := pgconn.ReceiveStartupMessage()
 	if err != nil {
-		return fmt.Errorf("error receiving startup message: %w", err)
+		return nil, fmt.Errorf("error receiving startup message: %w", err)
 	}
 
 	log.Printf("[%s] received startup message type: %T", clientAddr, startupMessage)
@@ -121,7 +132,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) error {
 		err := auth.AuthenticateUser(user, database, pc.config.Host, msg, pgconn, clientAddr)
 		if err != nil {
 			// Don't log full error for expected probe disconnects (psql password prompt behavior)
-			return err
+			return nil, err
 		}
 		log.Printf("[%s] user %s authenticated successfully", clientAddr, user)
 
@@ -130,12 +141,12 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) error {
 		err = pc.connectBackend(database, user)
 		if err != nil {
 			log.Printf("[%s] failed to connect to backend: %v", clientAddr, err)
-			return pc.sendErrorToClient(pgconn, "Database unavailable")
+			return nil, pc.sendErrorToClient(pgconn, "Database unavailable")
 		}
 		_, err = pc.poolConn.Exec(context.Background(), fmt.Sprintf("SET ROLE %s", user))
 		if err != nil {
 			pc.poolConn.Conn().Close(context.Background())
-			return pc.sendErrorToClient(pgconn, "failed to assume user role")
+			return nil, pc.sendErrorToClient(pgconn, "failed to assume user role")
 
 		}
 		log.Printf("[%s] backend connection established in %v", clientAddr, time.Since(start))
@@ -150,19 +161,51 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) error {
 		pc.db = database
 
 	case *pgproto3.SSLRequest:
-		log.Printf("[%s] SSL request received, rejecting (not implemented)", clientAddr)
-		_, err := pc.conn.Write([]byte{'N'})
-		if err != nil {
-			return fmt.Errorf("failed to send SSL rejection: %w", err)
+		log.Printf("[%s] SSL request received", clientAddr)
+
+		// Check if TLS is configured
+		if pc.tlsConfig == nil {
+			// TLS not configured - reject SSL request
+			log.Printf("[%s] SSL not configured, rejecting request", clientAddr)
+			_, err := pc.conn.Write([]byte{'N'})
+			if err != nil {
+				return nil, fmt.Errorf("failed to send SSL rejection: %w", err)
+			}
+			// Client will send StartupMessage again on same connection
+			return pc.handleStartupMessage(pgconn)
 		}
+
+		// TLS is configured - accept SSL request
+		log.Printf("[%s] SSL configured, upgrading connection to TLS", clientAddr)
+		_, err := pc.conn.Write([]byte{'S'})
+		if err != nil {
+			return nil, fmt.Errorf("failed to send SSL acceptance: %w", err)
+		}
+
+		// Upgrade connection to TLS
+		tlsConn := tls.Server(pc.conn, pc.tlsConfig)
+		err = tlsConn.Handshake()
+		if err != nil {
+			return nil,fmt.Errorf("TLS handshake failed: %w", err)
+		}
+
+		log.Printf("[%s] TLS handshake completed successfully", clientAddr)
+
+		// Replace the connection with TLS connection
+		pc.conn = tlsConn
+
+		// Create new pgproto3.Backend with TLS connection
+		pgconn = pgproto3.NewBackend(pgproto3.NewChunkReader(tlsConn), tlsConn)
+
+		// Now receive the actual StartupMessage over encrypted connection
 		return pc.handleStartupMessage(pgconn)
 
 	case *pgproto3.CancelRequest:
 		log.Printf("[%s] cancel request received (not implemented)", clientAddr)
-		return fmt.Errorf("cancel requests not implemented")
+		return nil,fmt.Errorf("cancel requests not implemented")
 	}
 
-	return nil
+	return pgconn,nil
 }
 
 // connectBackend establishes a connection to the backend database using connection pooling

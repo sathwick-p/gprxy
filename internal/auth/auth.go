@@ -56,7 +56,7 @@ func relayAuthFlow(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr strin
 			return fmt.Errorf("lost connection to backend: %w", err)
 		}
 
-		log.Printf("[%s] backend->client message: %T", clientAddr, msg)
+		// log.Printf("[%s] backend->client message: %T", clientAddr, msg)
 
 		// Forward backend's message to the client - either error or success
 		err = cb.Send(msg)
@@ -85,8 +85,8 @@ func relayAuthFlow(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr strin
 			// Continue to receive more startup messages
 
 		case *pgproto3.ParameterStatus:
-			log.Printf("[%s] parameter status - %s: %s",
-				clientAddr, message.Name, message.Value)
+			// log.Printf("[%s] parameter status - %s: %s",
+			// 	clientAddr, message.Name, message.Value)
 			// Continue to receive more startup messages
 		}
 
