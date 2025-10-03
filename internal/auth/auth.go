@@ -90,34 +90,101 @@ func relayAuthFlow(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr strin
 			// Continue to receive more startup messages
 		}
 
-		// If backend needs client response, get passwords etc
-		if needsClientResponse(msg) {
-			log.Printf("[%s] awaiting client response for: %T", clientAddr, msg)
-			clientMsg, err := cb.Receive()
-			if err != nil {
-				return fmt.Errorf("client disconnected: %w", err)
+		// Handle authentication challenges that need client response
+		switch authMsg := msg.(type) {
+		case *pgproto3.AuthenticationSASL:
+			// SCRAM-SHA-256 multi-step authentication
+			if err := handleSASLAuth(cb, bf, clientAddr); err != nil {
+				return err
 			}
-			log.Printf("[%s] client->backend message: %T", clientAddr, clientMsg)
-			err = bf.Send(clientMsg)
-			if err != nil {
-				return fmt.Errorf("backend error: %w", err)
+		case *pgproto3.AuthenticationSASLContinue:
+			// Continue SCRAM authentication
+			if err := handleSASLContinue(cb, bf, clientAddr); err != nil {
+				return err
 			}
-			// No Flush on Frontend; Send writes directly
+		case *pgproto3.AuthenticationSASLFinal:
+			// Final SCRAM message (no client response needed)
+			log.Printf("[%s] SASL authentication final step", clientAddr)
+			// Server will send AuthenticationOk next
+		case *pgproto3.AuthenticationMD5Password, *pgproto3.AuthenticationCleartextPassword:
+			// Simple password authentication
+			if err := handlePasswordAuth(cb, bf, clientAddr, authMsg); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-// needsClientResponse determines if a backend message requires a client response
-func needsClientResponse(msg pgproto3.BackendMessage) bool {
-	switch msg.(type) {
-	case *pgproto3.AuthenticationMD5Password,
-		*pgproto3.AuthenticationCleartextPassword,
-		*pgproto3.AuthenticationSASL,
-		*pgproto3.AuthenticationSASLContinue:
-		return true
-	default:
-		return false
+// handleSASLAuth handles SCRAM-SHA-256 authentication initial step
+func handleSASLAuth(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr string) error {
+	log.Printf("[%s] awaiting SASL initial response from client", clientAddr)
+	clientMsg, err := cb.Receive()
+	if err != nil {
+		return fmt.Errorf("client disconnected during SASL: %w", err)
 	}
+
+	// Client should send SASLInitialResponse, but might send PasswordMessage (protocol error)
+	switch msg := clientMsg.(type) {
+	case *pgproto3.SASLInitialResponse:
+		log.Printf("[%s] client->backend: SASLInitialResponse (mechanism: %s)", clientAddr, msg.AuthMechanism)
+		err = bf.Send(clientMsg)
+		if err != nil {
+			return fmt.Errorf("failed to send SASL response to backend: %w", err)
+		}
+	case *pgproto3.PasswordMessage:
+		// Client sent wrong message type - this will fail, but forward it anyway
+		// so the real error from PostgreSQL reaches the client
+		log.Printf("[%s] WARNING: client sent PasswordMessage for SASL auth (protocol mismatch)", clientAddr)
+		err = bf.Send(clientMsg)
+		if err != nil {
+			return fmt.Errorf("failed to send password to backend: %w", err)
+		}
+	default:
+		return fmt.Errorf("unexpected client message for SASL: %T", clientMsg)
+	}
+	return nil
+}
+
+// handleSASLContinue handles SCRAM-SHA-256 authentication continue step
+func handleSASLContinue(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr string) error {
+	log.Printf("[%s] awaiting SASL response from client", clientAddr)
+	clientMsg, err := cb.Receive()
+	if err != nil {
+		return fmt.Errorf("client disconnected during SASL continue: %w", err)
+	}
+
+	switch msg := clientMsg.(type) {
+	case *pgproto3.SASLResponse:
+		log.Printf("[%s] client->backend: SASLResponse", clientAddr)
+		err = bf.Send(clientMsg)
+		if err != nil {
+			return fmt.Errorf("failed to send SASL response to backend: %w", err)
+		}
+	default:
+		return fmt.Errorf("unexpected client message for SASL continue: %T (expected SASLResponse)", msg)
+	}
+	return nil
+}
+
+// handlePasswordAuth handles MD5 or cleartext password authentication
+func handlePasswordAuth(cb *pgproto3.Backend, bf *pgproto3.Frontend, clientAddr string, authMsg pgproto3.BackendMessage) error {
+	log.Printf("[%s] awaiting password from client", clientAddr)
+	clientMsg, err := cb.Receive()
+	if err != nil {
+		return fmt.Errorf("client disconnected during password auth: %w", err)
+	}
+
+	switch msg := clientMsg.(type) {
+	case *pgproto3.PasswordMessage:
+		log.Printf("[%s] client->backend: PasswordMessage", clientAddr)
+		err = bf.Send(clientMsg)
+		if err != nil {
+			return fmt.Errorf("failed to send password to backend: %w", err)
+		}
+	default:
+		return fmt.Errorf("unexpected client message for password auth: %T (expected PasswordMessage)", msg)
+	}
+	return nil
 }
 
 // sendErrorToClient sends an error message to the client
