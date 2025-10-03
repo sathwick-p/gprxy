@@ -116,9 +116,10 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) error {
 			clientAddr, user, database, appName)
 
 		// 1. Authenticate user with postgresql first
+		// Note: First connection might fail if client is probing for auth method (normal psql behavior)
 		err := auth.AuthenticateUser(user, database, pc.config.Host, msg, pgconn, clientAddr)
 		if err != nil {
-			log.Printf("[%s] authentication failed for user %s: %v", clientAddr, user, err)
+			// Don't log full error for expected probe disconnects (psql password prompt behavior)
 			return err
 		}
 		log.Printf("[%s] user %s authenticated successfully", clientAddr, user)

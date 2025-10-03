@@ -719,8 +719,8 @@ Here’s what I’m seeing right now:
 
 ```
 1. Proxy calls connectBackend()
-2. Uses config.BuildConnectionString() → "postgres://testuser:testpass@localhost:5432/cloudfront_data"
-3. Pool creates connection as "testuser" (service user)
+2. Uses config.BuildConnectionString() → "postgres://postgres:1234@localhost:5432/cloudfront_data"
+3. Pool creates connection as "postgres" (service user)
 4. All subsequent queries use this service user connection
 ```
 
