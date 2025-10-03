@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -131,6 +132,12 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) error {
 			log.Printf("[%s] failed to connect to backend: %v", clientAddr, err)
 			return pc.sendErrorToClient(pgconn, "Database unavailable")
 		}
+		_, err = pc.poolConn.Exec(context.Background(), fmt.Sprintf("SET ROLE %s", user))
+		if err != nil {
+			pc.poolConn.Conn().Close(context.Background())
+			return pc.sendErrorToClient(pgconn, "failed to assume user role")
+
+		}
 		log.Printf("[%s] backend connection established in %v", clientAddr, time.Since(start))
 
 		// Get the underlying net conn connection from pgpool connection for protocol communication
@@ -171,6 +178,7 @@ func (pc *Connection) connectBackend(database, user string) error {
 	log.Printf("[%s] acquired connection from pool for database: %s", pc.config.Host, database)
 
 	pool.LogPoolStats(user, database)
+
 	return nil
 }
 

@@ -47,3 +47,8 @@ For interactive terminal use:
 
 **Bottom line**: The proxy is working correctly. Move forward with OIDC auth implementation!
 
+
+
+So for the issue (not exactly a issue) but the dilemma i was facing of using a service user for my client users to authenticate but my postgres db would just see the service user running queries. I could easily aviod this whole thing by having a passwrods list being fetched from secrets manager saying these are the passwords now just use them for my client to connect to the db. But idk for now i dont want to do that 
+I;m handling the logging and auditing at my proxy end to see which user ran which query alogn with connection pooling. might change it later
+now starting with SSL encryption and then cancel request and then the big beast of OIDC is getting dealt with.
