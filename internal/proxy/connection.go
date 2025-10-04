@@ -2,8 +2,11 @@ package proxy
 
 import (
 	"crypto/tls"
+	"encoding/binary"
+	"fmt"
 	"log"
 	"net"
+	"time"
 
 	"github.com/jackc/pgproto3/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,13 +24,14 @@ type Connection struct {
 	user      string
 	db        string
 	tlsConfig *tls.Config
+	server    *Server
+	key       *pgproto3.BackendKeyData
 }
 
 // handleConnection processes a single client connection in its own goroutine
 func (pc *Connection) handleConnection() {
 	clientAddr := pc.conn.RemoteAddr().String()
-	log.Printf("[%s] new client connection established", clientAddr)
-
+	log.Printf("[%s] new client connection/creating established")
 	pgc := pgproto3.NewBackend(pgproto3.NewChunkReader(pc.conn), pc.conn)
 
 	defer func() {
@@ -38,6 +42,9 @@ func (pc *Connection) handleConnection() {
 		if pc.poolConn != nil {
 			pc.poolConn.Release()
 			log.Printf("[%s] released connection back to pool", clientAddr)
+		}
+		if pc.key != nil && pc.server != nil {
+			pc.server.unregisterConnection(pc.key.ProcessID, pc.key.SecretKey, pc)
 		}
 		log.Printf("[%s] connection closed", clientAddr)
 	}()
@@ -72,5 +79,39 @@ func (pc *Connection) connectBackend(database, user string) error {
 
 	pool.LogPoolStats(user, database)
 
+	return nil
+}
+
+func cancelRequest(host string, cancel *pgproto3.CancelRequest) error {
+	backendAddr := fmt.Sprintf("%s:5432", host)
+	conn, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to backend: %w", err)
+	}
+	defer conn.Close()
+
+	// Build cancel request message
+	buf := make([]byte, 16)
+	// message length - 16 bytes
+	binary.BigEndian.PutUint32(buf[0:4], 16)
+
+	// Cancel request code - 80877102
+	binary.BigEndian.PutUint32(buf[4:8], 80877102)
+
+	// Process ID
+	binary.BigEndian.PutUint32(buf[8:12], cancel.ProcessID)
+
+	// Secret key
+	binary.BigEndian.PutUint32(buf[12:16], cancel.SecretKey)
+
+	// Send to backend
+	_, err = conn.Write(buf)
+
+	if err != nil {
+		return fmt.Errorf("failed to send cancel: %w", err)
+	}
+
+	log.Printf("Cancel forwarded to backend: PID=%d, Key=%d",
+		cancel.ProcessID, cancel.SecretKey)
 	return nil
 }

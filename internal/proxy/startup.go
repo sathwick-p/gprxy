@@ -31,12 +31,12 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		log.Printf("[%s] connection request - user: %s, database: %s, app: %s",
 			clientAddr, user, database, appName)
 
-		err := auth.AuthenticateUser(user, database, pc.config.Host, msg, pgconn, clientAddr)
+		keyData, err := auth.AuthenticateUser(user, database, pc.config.Host, msg, pgconn, clientAddr)
 		if err != nil {
 			return nil, err
 		}
 		log.Printf("[%s] user %s authenticated successfully", clientAddr, user)
-
+		pc.key = &keyData
 		start := time.Now()
 		err = pc.connectBackend(database, user)
 		if err != nil {
@@ -50,7 +50,6 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 
 		}
 		log.Printf("[%s] backend connection established in %v", clientAddr, time.Since(start))
-
 		underlyingConn := pc.poolConn.Conn().PgConn().Conn()
 
 		bf := pgproto3.NewFrontend(pgproto3.NewChunkReader(underlyingConn), underlyingConn)
@@ -58,6 +57,28 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		pc.user = user
 		pc.db = database
 
+		backendPID := pc.poolConn.Conn().PgConn().PID()
+		backendSecretKey := pc.poolConn.Conn().PgConn().SecretKey()
+
+		pc.key = &pgproto3.BackendKeyData{
+			ProcessID: uint32(backendPID),
+			SecretKey: uint32(backendSecretKey),
+		}
+
+		log.Printf("[%s] Pool connection backend key: PID=%d, Key=%d", clientAddr, backendPID, backendSecretKey)
+
+		err = pgconn.Send(pc.key)
+		if err != nil {
+			log.Printf("[%s] failed to send BackendKeyData to client: %v", clientAddr, err)
+			return nil, fmt.Errorf("failed to send backend key data")
+		}
+		log.Printf("[%s] Sent pool BackendKeyData to client", clientAddr)
+
+		if pc.key != nil && pc.server != nil {
+			pc.server.registerConnection(pc.key.ProcessID, pc.key.SecretKey, pc)
+			log.Printf("[%s] Registered connection: PID=%d, Key=%d",
+				clientAddr, pc.key.ProcessID, pc.key.SecretKey)
+		}
 	case *pgproto3.SSLRequest:
 		log.Printf("[%s] SSL request received", clientAddr)
 
@@ -92,7 +113,21 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 
 	case *pgproto3.CancelRequest:
 		log.Printf("[%s] cancel request received (not implemented)", clientAddr)
-		return nil, fmt.Errorf("cancel requests not implemented")
+		targetConn, exists := pc.server.getConnectionForCancelRequest(msg.ProcessID, msg.SecretKey)
+		if !exists {
+			log.Printf("[%s] cancel request for unknown connection", clientAddr)
+			return nil, fmt.Errorf("cancel request processed - connection unknown")
+		}
+
+		log.Printf("[%s] found target connection: user=%s, db=%s", clientAddr, targetConn.user, targetConn.db)
+
+		err := cancelRequest(pc.config.Host, msg)
+		if err != nil {
+			log.Printf("[%s] failed to forward cancel: %v", clientAddr, err)
+			return nil, fmt.Errorf("cancel request failed: %w", err)
+		}
+		log.Printf("[%s] cancel request processed successfully", clientAddr)
+		return nil, fmt.Errorf("cancel requests processed")
 	}
 
 	return pgconn, nil

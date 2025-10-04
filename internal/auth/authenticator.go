@@ -14,14 +14,14 @@ import (
 
 // AuthenticateUser authenticates a user with PostgreSQL using a temporary connection
 // The proxy acts as a PostgreSQL client and handles all authentication methods (SCRAM, MD5, etc.)
-func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.StartupMessage, clientBackend *pgproto3.Backend, clientAddr string) error {
+func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.StartupMessage, clientBackend *pgproto3.Backend, clientAddr string) (pgproto3.BackendKeyData, error) {
 	backendAddress := host + ":5432"
 	log.Printf("[%s] connecting to PostgreSQL at %s as %s for authentication", clientAddr, backendAddress, user)
 
 	tempConnection, err := net.DialTimeout("tcp", backendAddress, 10*time.Second)
 	if err != nil {
 		log.Printf("[%s] failed to connect to PostgreSQL: %v", clientAddr, err)
-		return sendErrorToClient(clientBackend, "Backend Unavailable")
+		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Backend Unavailable")
 	}
 	defer tempConnection.Close()
 
@@ -31,7 +31,7 @@ func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.Star
 	err = tempFrontend.Send(startUpMessage)
 	if err != nil {
 		log.Printf("[%s] failed to send startup message: %v", clientAddr, err)
-		return sendErrorToClient(clientBackend, "Authentication failed")
+		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Authentication failed")
 	}
 
 	// First, ask the client for their password
@@ -39,19 +39,20 @@ func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.Star
 	password, err := requestPasswordFromClient(clientBackend, clientAddr)
 	if err != nil {
 		log.Printf("[%s] failed to get password from client: %v", clientAddr, err)
-		return sendErrorToClient(clientBackend, "Authentication failed")
+		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Authentication failed")
 	}
 
 	// Now authenticate WITH PostgreSQL using the password
 	log.Printf("[%s] starting authentication with PostgreSQL backend", clientAddr)
-	err = authenticateWithBackend(tempFrontend, clientBackend, user, password, clientAddr)
+	var backendKeyData *pgproto3.BackendKeyData
+	err = authenticateWithBackend(tempFrontend, clientBackend, user, password, clientAddr, &backendKeyData)
 	if err != nil {
 		log.Printf("[%s] authentication with backend failed: %v", clientAddr, err)
-		return err
+		return pgproto3.BackendKeyData{}, err
 	}
 
 	log.Printf("[%s] authentication completed successfully", clientAddr)
-	return nil
+	return *backendKeyData, nil
 }
 
 // requestPasswordFromClient asks the client for their password
@@ -78,7 +79,7 @@ func requestPasswordFromClient(clientBackend *pgproto3.Backend, clientAddr strin
 
 // authenticateWithBackend performs authentication WITH the PostgreSQL backend
 // The proxy acts as a PostgreSQL client and handles SCRAM, MD5, etc.
-func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto3.Backend, username, password, clientAddr string) error {
+func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto3.Backend, username, password, clientAddr string, backendKeyData **pgproto3.BackendKeyData) error {
 	var scramConversation *scram.ClientConversation
 
 	for {
@@ -126,6 +127,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 		case *pgproto3.BackendKeyData:
 			log.Printf("[%s] backend key data received", clientAddr)
 			// Forward to client
+			*backendKeyData = authMsg
 			err := clientBackend.Send(authMsg)
 			if err != nil {
 				return fmt.Errorf("failed to forward BackendKeyData: %w", err)

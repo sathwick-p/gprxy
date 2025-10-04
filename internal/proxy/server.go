@@ -5,21 +5,68 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
 
 	"gprxy.com/internal/config"
 )
 
 // Server represents the proxy server
 type Server struct {
-	config    *config.Config
-	tlsConfig *tls.Config
+	config            *config.Config
+	tlsConfig         *tls.Config
+	activeConnections map[uint64]*Connection
+	connMutex         sync.RWMutex
+}
+
+// Combines ProcessID and SecretKey into a single uint64:
+// high 32 bits = ProcessID, low 32 bits = SecretKey
+func (s *Server) makeCancelKey(processId, secretKey uint32) uint64 {
+	return (uint64(processId) << 32) | uint64(secretKey)
+}
+
+func (s *Server) registerConnection(processId, secretkey uint32, conn *Connection) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+	key := s.makeCancelKey(processId, secretkey)
+	s.activeConnections[key] = conn
+	log.Printf("Registered connection: PID=%d, Key=%d", processId, secretkey)
+}
+
+func (s *Server) unregisterConnection(processId, secretkey uint32, conn *Connection) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+	key := s.makeCancelKey(processId, secretkey)
+	delete(s.activeConnections, key)
+}
+
+func (s *Server) getConnectionForCancelRequest(processId, secretkey uint32) (*Connection, bool) {
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+	key := s.makeCancelKey(processId, secretkey)
+	// DEBUG: Log what we're looking for
+	log.Printf("Looking for cancel key: PID=%d, Key=%d, computed_key=%d",
+		processId, secretkey, key)
+
+	// DEBUG: Log all active connections
+	log.Printf("Active connections in map: %d", len(s.activeConnections))
+	for k, v := range s.activeConnections {
+		log.Printf("  Map entry: key=%d, user=%s, db=%s", k, v.user, v.db)
+	}
+	conn, exists := s.activeConnections[key]
+	if exists {
+		log.Printf("Found connection for cancel: user=%s, db=%s", conn.user, conn.db)
+	} else {
+		log.Printf("Connection NOT FOUND for key=%d", key)
+	}
+	return conn, exists
 }
 
 // NewServer creates a new proxy server
 func NewServer(cfg *config.Config, tls *tls.Config) *Server {
 	return &Server{
-		config:    cfg,
-		tlsConfig: tls,
+		config:            cfg,
+		tlsConfig:         tls,
+		activeConnections: make(map[uint64]*Connection),
 	}
 }
 
@@ -47,6 +94,7 @@ func (s *Server) Start() error {
 			conn:      conn,
 			config:    s.config,
 			tlsConfig: s.tlsConfig,
+			server:    s,
 		}
 		go pc.handleConnection()
 	}

@@ -15,7 +15,6 @@ func (pc *Connection) handleMessage(client *pgproto3.Backend) error {
 	}
 
 	clientAddr := pc.conn.RemoteAddr().String()
-
 	switch query := msg.(type) {
 	case *pgproto3.Query:
 		log.Printf("[%s] [%s] QUERY: %s", clientAddr, pc.user, query.String)
