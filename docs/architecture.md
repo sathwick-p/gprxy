@@ -101,62 +101,98 @@ case *pgproto3.StartupMessage:
 
 ---
 
-## **Phase 4: Authentication Process (Dual Connection)**
+## **Phase 4: Authentication Process (Proxy-Mediated Authentication)**
 
-### **4.1 Client Connection State Check (Your Recent Addition)**
-```go
-// Your new code: Check if client is still connected
-if conn, ok := pc.conn.(*net.TCPConn); ok {
-    conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-    // Test if client is still there
-}
+> **⚠️ IMPORTANT UPDATE**: The authentication approach has been completely redesigned to support SCRAM-SHA-256. 
+> See [scram-authentication-fix.md](./scram-authentication-fix.md) for full details.
+
+### **4.1 New Authentication Architecture**
+
+**Paradigm Shift**: The proxy now **performs authentication itself** rather than transparently relaying messages.
+
+```
+┌────────┐                              ┌───────┐                              ┌──────────┐
+│ Client │                              │ Proxy │                              │ Backend  │
+│        │  AuthenticationCleartext     │       │  SCRAM-SHA-256 / MD5        │          │
+│        │ ◄──────────────────────────  │       │  ──────────────────────────► │          │
+└────────┘                              └───────┘                              └──────────┘
+        Simple cleartext over TLS              Proxy handles complex auth
 ```
 
-**Purpose**: Prevent authentication on already-disconnected clients
+**Key Insight**: 
+- Proxy acts as **PostgreSQL server** to client (requests password)
+- Proxy acts as **PostgreSQL client** to backend (performs SCRAM/MD5)
+- This solves TLS channel binding issues with SCRAM-SHA-256-PLUS
 
 ### **4.2 Authentication Initiation**
 ```go
-// proxy.go:119
+// internal/proxy/startup.go
 err := auth.AuthenticateUser(user, database, pc.config.Host, msg, pgconn, clientAddr)
 ```
 
-**Key Point**: This is where the **temporary connection** is created!
-
-### **4.3 Temporary Connection Creation (`AuthenticateUser()`)**
+### **4.3 Temporary Connection Creation**
 ```go
-// auth.go:20-32
-backendAddress := host + ":5432"  // "localhost:5432"
+// internal/auth/authenticator.go
+backendAddress := host + ":5432"
 tempConnection, err := net.DialTimeout("tcp", backendAddress, 10*time.Second)
 tempFrontend := pgproto3.NewFrontend(pgproto3.NewChunkReader(tempConnection), tempConnection)
 ```
 
-**Architecture Moment**: 
-```
-Client ←→ Proxy ←→ PostgreSQL (Temporary Connection)
-```
+**Purpose**: 
+- Dedicated connection for authentication only
+- Doesn't affect connection pool
+- Closed after auth completes
 
-**Purpose**: Validate client credentials without affecting the connection pool
-
-### **4.4 Authentication Relay (`relayAuthFlow()`)**
+### **4.4 Request Password from Client**
 ```go
-// auth.go:44
-err = relayAuthFlow(clientBackend, tempFrontend, clientAddr)
+// NEW: Proxy requests password from client
+func requestPasswordFromClient(clientBackend *pgproto3.Backend) (string, error) {
+    // Send cleartext password request
+    clientBackend.Send(&pgproto3.AuthenticationCleartextPassword{})
+    
+    // Receive password (over TLS)
+    msg, _ := clientBackend.Receive()
+    return msg.(*pgproto3.PasswordMessage).Password, nil
+}
 ```
 
-**What happens:**
-1. **Proxy → PostgreSQL**: Forwards client's `StartupMessage`
-2. **PostgreSQL → Proxy**: Sends authentication challenge (MD5/SASL)
-3. **Proxy → Client**: Forwards authentication challenge
-4. **Client → Proxy**: Sends password response
-5. **Proxy → PostgreSQL**: Forwards password response
-6. **PostgreSQL → Proxy**: Sends `AuthenticationOk` + metadata
-7. **Proxy → Client**: Forwards success confirmation
-
-**Critical Flow:**
+**Flow:**
 ```
-PostgreSQL: "Send MD5 password with salt [1,2,3,4]"
-Client: Computes MD5(MD5("testpass2" + "testuser2") + salt)
-Client: Sends "md56b56616068722b912e1131a445457bc1"
+Proxy → Client: AuthenticationCleartextPassword {}
+Client → Proxy: PasswordMessage { password: "user_password" }
+```
+
+**Security**: Password sent over TLS-encrypted connection
+
+### **4.5 Authenticate WITH Backend**
+```go
+// NEW: Proxy performs authentication as PostgreSQL client
+func authenticateWithBackend(frontend *pgproto3.Frontend, username, password string) error {
+    for {
+        msg, _ := frontend.Receive()
+        
+        switch msg.(type) {
+        case *pgproto3.AuthenticationSASL:
+            // Proxy performs SCRAM-SHA-256
+            client, _ := scram.SHA256.NewClient(username, password, "")
+            conversation := client.NewConversation()
+            initialResponse, _ := conversation.Step("")
+            
+            frontend.Send(&pgproto3.SASLInitialResponse{
+                AuthMechanism: "SCRAM-SHA-256",
+                Data:          []byte(initialResponse),
+            })
+            
+        case *pgproto3.AuthenticationMD5Password:
+            // Proxy computes MD5 hash
+            hash := computeMD5(password, username, msg.Salt)
+            frontend.Send(&pgproto3.PasswordMessage{Password: hash})
+            
+        case *pgproto3.AuthenticationOk:
+            return nil  // Success!
+        }
+    }
+}
 PostgreSQL: Validates and responds "AuthenticationOk"
 ```
 
