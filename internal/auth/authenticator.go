@@ -106,17 +106,14 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 			continue
 
 		case *pgproto3.ReadyForQuery:
-			log.Printf("[%s] backend ready for queries", clientAddr)
-			// Send ReadyForQuery to client
-			err := clientBackend.Send(authMsg)
-			if err != nil {
-				return fmt.Errorf("failed to send ReadyForQuery to client: %w", err)
-			}
+			log.Printf("[%s] temp auth connection ready for queries (will NOT forward ReadyForQuery yet)", clientAddr)
+			// DO NOT send ReadyForQuery to client yet
+			// The client will receive ReadyForQuery after the pool connection's BackendKeyData is sent
 			return nil
 
 		case *pgproto3.ParameterStatus:
 			log.Printf("[%s] parameter status: %s = %s", clientAddr, authMsg.Name, authMsg.Value)
-			
+
 			// Forward to client
 			err := clientBackend.Send(authMsg)
 			if err != nil {
@@ -125,13 +122,10 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 			continue
 
 		case *pgproto3.BackendKeyData:
-			log.Printf("[%s] backend key data received, pid=%v, secret_key=%v", clientAddr, authMsg.ProcessID, authMsg.SecretKey)
-			// Forward to client
+			log.Printf("[%s] temp auth connection backend key data received (will NOT forward), pid=%v, secret_key=%v", clientAddr, authMsg.ProcessID, authMsg.SecretKey)
+			// Store the BackendKeyData but DO NOT forward to client
+			// The client will receive the pool connection's BackendKeyData later
 			*backendKeyData = authMsg
-			err := clientBackend.Send(authMsg)
-			if err != nil {
-				return fmt.Errorf("failed to forward BackendKeyData: %w", err)
-			}
 			continue
 
 		case *pgproto3.AuthenticationCleartextPassword:

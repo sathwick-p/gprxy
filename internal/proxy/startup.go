@@ -73,6 +73,15 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		}
 		log.Printf("[%s] Sent pool BackendKeyData to client", clientAddr)
 
+		// Now send ReadyForQuery to complete the startup sequence
+		readyMsg := &pgproto3.ReadyForQuery{TxStatus: 'I'} // 'I' = idle
+		err = pgconn.Send(readyMsg)
+		if err != nil {
+			log.Printf("[%s] failed to send ReadyForQuery to client: %v", clientAddr, err)
+			return nil, fmt.Errorf("failed to send ready for query")
+		}
+		log.Printf("[%s] Sent ReadyForQuery to client", clientAddr)
+
 		if pc.key != nil && pc.server != nil {
 			pc.server.registerConnection(pc.key.ProcessID, pc.key.SecretKey, pc)
 			log.Printf("[%s] Registered connection: PID=%d, Key=%d",
