@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+
+	"gprxy.com/internal/logger"
 )
 
 // Load loads TLS configuration from environment variables
@@ -13,7 +15,7 @@ import (
 func Load() *tls.Config {
 	err := godotenv.Load(".env")
 	if err != nil {
-		log.Println("No .env file found, using system environment")
+		logger.Debug("no .env file found, using system environment")
 	}
 
 	proxyCert := os.Getenv("PROXY_CERT")
@@ -21,14 +23,14 @@ func Load() *tls.Config {
 
 	// If TLS is not configured, return nil (proxy will work without TLS)
 	if proxyCert == "" || proxyKey == "" {
-		log.Println("TLS not configured (PROXY_CERT or PROXY_KEY not set) - proxy will run without TLS support")
+		logger.Info("TLS not configured (PROXY_CERT or PROXY_KEY not set) - proxy will run without TLS support")
 		return nil
 	}
 
 	// Load the certificate and private key
 	cert, err := tls.LoadX509KeyPair(proxyCert, proxyKey)
 	if err != nil {
-		log.Fatalf("Failed to load TLS certificate: %v", err)
+		log.Fatalf("failed to load TLS certificate: %v", err)
 	}
 
 	// Create TLS config with security best practices
@@ -58,6 +60,6 @@ func Load() *tls.Config {
 		},
 	}
 
-	log.Printf("TLS configured successfully (cert: %s, key: %s)", proxyCert, proxyKey)
+	logger.Info("TLS configured successfully (cert: %s, key: %s)", proxyCert, proxyKey)
 	return config
 }

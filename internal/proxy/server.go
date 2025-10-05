@@ -3,11 +3,11 @@ package proxy
 import (
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 
 	"gprxy.com/internal/config"
+	"gprxy.com/internal/logger"
 )
 
 // Server represents the proxy server
@@ -29,10 +29,11 @@ func (s *Server) registerConnection(processId, secretkey uint32, conn *Connectio
 	defer s.connMutex.Unlock()
 	key := s.makeCancelKey(processId, secretkey)
 	s.activeConnections[key] = conn
-	log.Printf("Registered connection: PID=%d, Secret_Key=%d, map_key=%d", processId, secretkey, key)
-	log.Printf("Active connections in map: %d", len(s.activeConnections))
+	logger.Debug("registered connection: PID=%d, secret_key=%d, map_key=%d", processId, secretkey, key)
+	logger.Debug("active connections in registry: %d", len(s.activeConnections))
 	for k, v := range s.activeConnections {
-		log.Printf("Map entry: key=%d, user=%s, db=%s, secret_key=%v, pid=%v", k, v.user, v.db, v.poolConn.Conn().PgConn().SecretKey(), v.poolConn.Conn().PgConn().PID())
+		logger.Debug("registry entry: key=%d, user=%s, db=%s, secret_key=%v, pid=%v",
+			k, v.user, v.db, v.poolConn.Conn().PgConn().SecretKey(), v.poolConn.Conn().PgConn().PID())
 	}
 }
 
@@ -47,20 +48,20 @@ func (s *Server) getConnectionForCancelRequest(processId, secretkey uint32) (*Co
 	s.connMutex.RLock()
 	defer s.connMutex.RUnlock()
 	key := s.makeCancelKey(processId, secretkey)
-	// DEBUG: Log what we're looking for
-	log.Printf("Looking for cancel key: PID=%d, Key=%d, computed_key=%d",
-		processId, secretkey, key)
 
-	// DEBUG: Log all active connections
-	log.Printf("Active connections in map: %d", len(s.activeConnections))
+	logger.Debug("looking for cancel key: PID=%d, secret_key=%d, computed_key=%d",
+		processId, secretkey, key)
+	logger.Debug("active connections in registry: %d", len(s.activeConnections))
+
 	for k, v := range s.activeConnections {
-		log.Printf("  Map entry: key=%d, user=%s, db=%s", k, v.user, v.db)
+		logger.Debug("registry entry: key=%d, user=%s, db=%s", k, v.user, v.db)
 	}
+
 	conn, exists := s.activeConnections[key]
 	if exists {
-		log.Printf("Found connection for cancel: user=%s, db=%s", conn.user, conn.db)
+		logger.Debug("found connection for cancel request: user=%s, db=%s", conn.user, conn.db)
 	} else {
-		log.Printf("Connection NOT FOUND for key=%d", key)
+		logger.Debug("connection not found for cancel key=%d", key)
 	}
 	return conn, exists
 }
@@ -85,12 +86,12 @@ func (s *Server) Start() error {
 	if s.tlsConfig != nil {
 		tlsStatus = "enabled"
 	}
-	log.Printf("PostgreSQL proxy listening on %s (TLS: %s)", ln.Addr(), tlsStatus)
+	logger.Info("PostgreSQL proxy listening on %s (TLS: %s)", ln.Addr(), tlsStatus)
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Printf("failed to accept connection: %v", err)
+			logger.Error("failed to accept connection: %v", err)
 			continue
 		}
 

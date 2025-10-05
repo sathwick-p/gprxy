@@ -3,11 +3,12 @@ package pool
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"gprxy.com/internal/logger"
 )
 
 type poolKey struct {
@@ -65,7 +66,7 @@ func GetOrCreatePool(user, database, connectionString string) (*pgxpool.Pool, er
 		return nil, fmt.Errorf("failed to create pool: %w", err)
 	}
 	poolManager[key] = pool
-	log.Printf("Created a new connection pool for database: %s", database)
+	logger.Info("created connection pool for database: %s", database)
 	return pool, nil
 }
 

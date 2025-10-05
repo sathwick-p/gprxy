@@ -4,12 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/jackc/pgproto3/v2"
 
 	"gprxy.com/internal/auth"
+	"gprxy.com/internal/logger"
 )
 
 // handleStartupMessage handles the initial client startup message
@@ -21,26 +21,26 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		return nil, fmt.Errorf("error receiving startup message: %w", err)
 	}
 
-	log.Printf("[%s] received startup message type: %T", clientAddr, startupMessage)
+	logger.Debug("received startup message type: %T", startupMessage)
 
 	switch msg := startupMessage.(type) {
 	case *pgproto3.StartupMessage:
 		user := msg.Parameters["user"]
 		database := msg.Parameters["database"]
 		appName := msg.Parameters["application_name"]
-		log.Printf("[%s] connection request - user: %s, database: %s, app: %s",
-			clientAddr, user, database, appName)
+		logger.Info("connection request - user: %s, database: %s, app: %s",
+			user, database, appName)
 
 		keyData, err := auth.AuthenticateUser(user, database, pc.config.Host, msg, pgconn, clientAddr)
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("[%s] user %s authenticated successfully", clientAddr, user)
+		logger.Info("user %s authenticated successfully", user)
 		pc.key = &keyData
 		start := time.Now()
 		err = pc.connectBackend(database, user)
 		if err != nil {
-			log.Printf("[%s] failed to connect to backend: %v", clientAddr, err)
+			logger.Error("failed to connect to backend: %v", err)
 			return nil, pc.sendErrorToClient(pgconn, "Database unavailable")
 		}
 		_, err = pc.poolConn.Exec(context.Background(), fmt.Sprintf("SET ROLE %s", user))
@@ -49,7 +49,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 			return nil, pc.sendErrorToClient(pgconn, "failed to assume user role")
 
 		}
-		log.Printf("[%s] backend connection established in %v", clientAddr, time.Since(start))
+		logger.Debug("backend connection established in %v", time.Since(start))
 		underlyingConn := pc.poolConn.Conn().PgConn().Conn()
 
 		bf := pgproto3.NewFrontend(pgproto3.NewChunkReader(underlyingConn), underlyingConn)
@@ -65,33 +65,33 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 			SecretKey: uint32(backendSecretKey),
 		}
 
-		log.Printf("[%s] Pool connection backend key: PID=%d, Key=%d", clientAddr, backendPID, backendSecretKey)
+		logger.Debug("pool connection backend key: PID=%d, secret_key=%d", backendPID, backendSecretKey)
 		err = pgconn.Send(pc.key)
 		if err != nil {
-			log.Printf("[%s] failed to send BackendKeyData to client: %v", clientAddr, err)
+			logger.Error("failed to send BackendKeyData to client: %v", err)
 			return nil, fmt.Errorf("failed to send backend key data")
 		}
-		log.Printf("[%s] Sent pool BackendKeyData to client", clientAddr)
+		logger.Debug("sent pool BackendKeyData to client")
 
 		// Now send ReadyForQuery to complete the startup sequence
 		readyMsg := &pgproto3.ReadyForQuery{TxStatus: 'I'} // 'I' = idle
 		err = pgconn.Send(readyMsg)
 		if err != nil {
-			log.Printf("[%s] failed to send ReadyForQuery to client: %v", clientAddr, err)
+			logger.Error("failed to send ReadyForQuery to client: %v", err)
 			return nil, fmt.Errorf("failed to send ready for query")
 		}
-		log.Printf("[%s] Sent ReadyForQuery to client", clientAddr)
+		logger.Debug("sent ReadyForQuery to client")
 
 		if pc.key != nil && pc.server != nil {
 			pc.server.registerConnection(pc.key.ProcessID, pc.key.SecretKey, pc)
-			log.Printf("[%s] Registered connection: PID=%d, Key=%d",
-				clientAddr, pc.key.ProcessID, pc.key.SecretKey)
+			logger.Debug("registered connection: PID=%d, secret_key=%d",
+				pc.key.ProcessID, pc.key.SecretKey)
 		}
 	case *pgproto3.SSLRequest:
-		log.Printf("[%s] SSL request received", clientAddr)
+		logger.Debug("SSL request received")
 
 		if pc.tlsConfig == nil {
-			log.Printf("[%s] SSL not configured, rejecting request", clientAddr)
+			logger.Debug("SSL not configured, rejecting request")
 			_, err := pc.conn.Write([]byte{'N'})
 			if err != nil {
 				return nil, fmt.Errorf("failed to send SSL rejection: %w", err)
@@ -99,7 +99,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 			return pc.handleStartupMessage(pgconn)
 		}
 
-		log.Printf("[%s] SSL configured, upgrading connection to TLS", clientAddr)
+		logger.Debug("SSL configured, upgrading connection to TLS")
 		_, err := pc.conn.Write([]byte{'S'})
 		if err != nil {
 			return nil, fmt.Errorf("failed to send SSL acceptance: %w", err)
@@ -111,7 +111,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 			return nil, fmt.Errorf("TLS handshake failed: %w", err)
 		}
 
-		log.Printf("[%s] TLS handshake completed successfully", clientAddr)
+		logger.Debug("TLS handshake completed successfully")
 
 		pc.conn = tlsConn
 
@@ -120,22 +120,22 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		return pc.handleStartupMessage(pgconn)
 
 	case *pgproto3.CancelRequest:
-		log.Printf("[%s] cancel request received for pid=%v, secret_key=%d", clientAddr, msg.ProcessID, msg.SecretKey)
+		logger.Info("cancel request received: PID=%d, secret_key=%d", msg.ProcessID, msg.SecretKey)
 		targetConn, exists := pc.server.getConnectionForCancelRequest(msg.ProcessID, msg.SecretKey)
 		if !exists {
-			log.Printf("[%s] cancel request for unknown connection", clientAddr)
+			logger.Warn("cancel request for unknown connection")
 			return nil, fmt.Errorf("cancel request processed - connection unknown")
 		}
 
-		log.Printf("[%s] found target connection: user=%s, db=%s", clientAddr, targetConn.user, targetConn.db)
+		logger.Debug("found target connection: user=%s, db=%s", targetConn.user, targetConn.db)
 
 		err := cancelRequest(pc.config.Host, msg)
 		if err != nil {
-			log.Printf("[%s] failed to forward cancel: %v", clientAddr, err)
+			logger.Error("failed to forward cancel request: %v", err)
 			return nil, fmt.Errorf("cancel request failed: %w", err)
 		}
-		log.Printf("[%s] cancel request processed successfully", clientAddr)
-		return nil, fmt.Errorf("cancel requests processed")
+		logger.Info("cancel request forwarded successfully")
+		return nil, fmt.Errorf("cancel request processed")
 	}
 
 	return pgconn, nil

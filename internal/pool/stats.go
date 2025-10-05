@@ -1,7 +1,7 @@
 package pool
 
 import (
-	"log"
+	"gprxy.com/internal/logger"
 )
 
 // LogPoolStats logs statistics for the given database pool
@@ -15,11 +15,11 @@ func LogPoolStats(user, database string) {
 	poolMutex.RUnlock()
 
 	if !exists {
-		log.Printf("No pool found for user %s and database: %s", user, database)
+		logger.Warn("no pool found for user %s and database: %s", user, database)
 		return
 	}
 
 	stats := pool.Stat()
-	log.Printf("Pool stats for [%s,%s]- Total: %d, Acquired: %d, Idle: %d", user, database,
+	logger.Debug("pool stats for [%s,%s] - total: %d, acquired: %d, idle: %d", user, database,
 		stats.TotalConns(), stats.AcquiredConns(), stats.IdleConns())
 }

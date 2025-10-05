@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"net"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gprxy.com/internal/config"
+	"gprxy.com/internal/logger"
 	"gprxy.com/internal/pool"
 )
 
@@ -30,36 +30,35 @@ type Connection struct {
 
 // handleConnection processes a single client connection in its own goroutine
 func (pc *Connection) handleConnection() {
-	clientAddr := pc.conn.RemoteAddr().String()
-	log.Printf("[%s] new client connection/creating established", clientAddr)
+	logger.Debug("new client connection established")
 	pgc := pgproto3.NewBackend(pgproto3.NewChunkReader(pc.conn), pc.conn)
 
 	defer func() {
 		if err := pc.conn.Close(); err != nil {
-			log.Printf("[%s] error closing client connection: %v", clientAddr, err)
+			logger.Error("error closing client connection: %v", err)
 		}
 
 		if pc.poolConn != nil {
 			pc.poolConn.Release()
-			log.Printf("[%s] released connection back to pool", clientAddr)
+			logger.Debug("released connection back to pool")
 		}
 		if pc.key != nil && pc.server != nil {
 			pc.server.unregisterConnection(pc.key.ProcessID, pc.key.SecretKey, pc)
 		}
-		log.Printf("[%s] connection closed", clientAddr)
+		logger.Info("connection closed")
 	}()
 
 	pgc, err := pc.handleStartupMessage(pgc)
 	if err != nil {
-		log.Printf("[%s] startup failed: %v", clientAddr, err)
+		logger.Error("startup failed: %v", err)
 		return
 	}
 
-	log.Printf("[%s] entering query handling loop", clientAddr)
+	logger.Debug("entering query handling loop")
 	for {
 		err := pc.handleMessage(pgc)
 		if err != nil {
-			log.Printf("[%s] query handling error: %v", clientAddr, err)
+			logger.Debug("query handling terminated: %v", err)
 			return
 		}
 	}
@@ -75,7 +74,7 @@ func (pc *Connection) connectBackend(database, user string) error {
 	}
 
 	pc.poolConn = connection
-	log.Printf("[%s] acquired connection from pool for database: %s", pc.config.Host, database)
+	logger.Debug("acquired connection from pool for database: %s", database)
 
 	pool.LogPoolStats(user, database)
 
@@ -92,7 +91,7 @@ func cancelRequest(host string, cancel *pgproto3.CancelRequest) error {
 
 	// Build cancel request message
 	buf := make([]byte, 16)
-	// message length - 16 bytes
+	// Message length - 16 bytes
 	binary.BigEndian.PutUint32(buf[0:4], 16)
 
 	// Cancel request code - 80877102
@@ -111,7 +110,7 @@ func cancelRequest(host string, cancel *pgproto3.CancelRequest) error {
 		return fmt.Errorf("failed to send cancel: %w", err)
 	}
 
-	log.Printf("Cancel forwarded to backend: PID=%d, Key=%d",
+	logger.Debug("cancel request forwarded to backend: PID=%d, secret_key=%d",
 		cancel.ProcessID, cancel.SecretKey)
 	return nil
 }

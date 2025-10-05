@@ -2,9 +2,10 @@ package proxy
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/jackc/pgproto3/v2"
+
+	"gprxy.com/internal/logger"
 )
 
 // handleMessage handles incoming client messages after authentication
@@ -14,44 +15,43 @@ func (pc *Connection) handleMessage(client *pgproto3.Backend) error {
 		return fmt.Errorf("client receive error: %w", err)
 	}
 
-	clientAddr := pc.conn.RemoteAddr().String()
 	key := pc.poolConn.Conn().PgConn().SecretKey()
 	pid := pc.poolConn.Conn().PgConn().PID()
 	switch query := msg.(type) {
 	case *pgproto3.Query:
-		log.Printf("[%s] [%s] QUERY: %s", clientAddr, pc.user, query.String)
-		log.Printf("[%s] Query connection's pid=%d, secret_key=%d", clientAddr, pid, key)
+		logger.Info("[%s] query: %s", pc.user, query.String)
+		logger.Debug("query connection PID=%d, secret_key=%d", pid, key)
 
 	case *pgproto3.Parse:
-		log.Printf("[%s] [%s] PARSE: statement='%s' query='%s'", clientAddr, pc.user, query.Name, query.Query)
+		logger.Debug("[%s] parse: statement='%s' query='%s'", pc.user, query.Name, query.Query)
 
 	case *pgproto3.Describe:
 		objectType := "statement"
 		if query.ObjectType == 'P' {
 			objectType = "portal"
 		}
-		log.Printf("[%s] [%s] DESCRIBE: %s='%s'", clientAddr, pc.user, objectType, query.Name)
+		logger.Debug("[%s] describe: %s='%s'", pc.user, objectType, query.Name)
 
 	case *pgproto3.Bind:
 		paramCount := len(query.Parameters)
-		log.Printf("[%s] [%s] BIND: portal='%s' statement='%s' params=%d", clientAddr, pc.user, query.DestinationPortal, query.PreparedStatement, paramCount)
+		logger.Debug("[%s] bind: portal='%s' statement='%s' params=%d", pc.user, query.DestinationPortal, query.PreparedStatement, paramCount)
 
 	case *pgproto3.Execute:
 		maxRows := "unlimited"
 		if query.MaxRows > 0 {
 			maxRows = fmt.Sprintf("%d", query.MaxRows)
 		}
-		log.Printf("[%s] [%s] EXECUTE: portal='%s' max_rows=%s", clientAddr, pc.user, query.Portal, maxRows)
+		logger.Debug("[%s] execute: portal='%s' max_rows=%s", pc.user, query.Portal, maxRows)
 
 	case *pgproto3.Sync:
-		log.Printf("[%s] [%s] SYNC: transaction boundary", clientAddr, pc.user)
+		logger.Debug("[%s] sync: transaction boundary", pc.user)
 
 	case *pgproto3.Terminate:
-		log.Printf("[%s] [%s] TERMINATE: client disconnecting gracefully", clientAddr, pc.user)
+		logger.Info("[%s] client disconnecting gracefully", pc.user)
 		return fmt.Errorf("client terminated")
 
 	default:
-		log.Printf("[%s] [%s] UNKNOWN_MESSAGE: %T", clientAddr, pc.user, query)
+		logger.Debug("[%s] unknown message type: %T", pc.user, query)
 	}
 
 	err = pc.bf.Send(msg)
@@ -68,8 +68,6 @@ func (pc *Connection) handleMessage(client *pgproto3.Backend) error {
 
 // relayBackendResponse relays backend responses back to the client
 func (pc *Connection) relayBackendResponse(client *pgproto3.Backend) error {
-	clientAddr := pc.conn.RemoteAddr().String()
-
 	for {
 		msg, err := pc.bf.Receive()
 		if err != nil {
@@ -83,15 +81,15 @@ func (pc *Connection) relayBackendResponse(client *pgproto3.Backend) error {
 
 		switch msgType := msg.(type) {
 		case *pgproto3.ReadyForQuery:
-			log.Printf("[%s] query completed, ready for next (status: %c)",
-				clientAddr, msgType.TxStatus)
+			logger.Debug("query completed, ready for next query (status: %c)",
+				msgType.TxStatus)
 			return nil
 		case *pgproto3.ErrorResponse:
-			log.Printf("[%s] query error: %s (code: %s)",
-				clientAddr, msgType.Message, msgType.Code)
+			logger.Warn("query error: %s (code: %s)",
+				msgType.Message, msgType.Code)
 		case *pgproto3.CommandComplete:
-			log.Printf("[%s] command completed: %s",
-				clientAddr, msgType.CommandTag)
+			logger.Debug("command completed: %s",
+				msgType.CommandTag)
 		}
 	}
 }
