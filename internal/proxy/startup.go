@@ -66,7 +66,6 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		}
 
 		log.Printf("[%s] Pool connection backend key: PID=%d, Key=%d", clientAddr, backendPID, backendSecretKey)
-
 		err = pgconn.Send(pc.key)
 		if err != nil {
 			log.Printf("[%s] failed to send BackendKeyData to client: %v", clientAddr, err)
@@ -112,7 +111,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		return pc.handleStartupMessage(pgconn)
 
 	case *pgproto3.CancelRequest:
-		log.Printf("[%s] cancel request received (not implemented)", clientAddr)
+		log.Printf("[%s] cancel request received for pid=%v, secret_key=%d", clientAddr, msg.ProcessID, msg.SecretKey)
 		targetConn, exists := pc.server.getConnectionForCancelRequest(msg.ProcessID, msg.SecretKey)
 		if !exists {
 			log.Printf("[%s] cancel request for unknown connection", clientAddr)

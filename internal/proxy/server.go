@@ -29,7 +29,11 @@ func (s *Server) registerConnection(processId, secretkey uint32, conn *Connectio
 	defer s.connMutex.Unlock()
 	key := s.makeCancelKey(processId, secretkey)
 	s.activeConnections[key] = conn
-	log.Printf("Registered connection: PID=%d, Key=%d", processId, secretkey)
+	log.Printf("Registered connection: PID=%d, Secret_Key=%d, map_key=%d", processId, secretkey, key)
+	log.Printf("Active connections in map: %d", len(s.activeConnections))
+	for k, v := range s.activeConnections {
+		log.Printf("Map entry: key=%d, user=%s, db=%s, secret_key=%v, pid=%v", k, v.user, v.db, v.poolConn.Conn().PgConn().SecretKey(), v.poolConn.Conn().PgConn().PID())
+	}
 }
 
 func (s *Server) unregisterConnection(processId, secretkey uint32, conn *Connection) {

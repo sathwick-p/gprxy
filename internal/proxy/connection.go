@@ -31,7 +31,7 @@ type Connection struct {
 // handleConnection processes a single client connection in its own goroutine
 func (pc *Connection) handleConnection() {
 	clientAddr := pc.conn.RemoteAddr().String()
-	log.Printf("[%s] new client connection/creating established")
+	log.Printf("[%s] new client connection/creating established", clientAddr)
 	pgc := pgproto3.NewBackend(pgproto3.NewChunkReader(pc.conn), pc.conn)
 
 	defer func() {

@@ -15,9 +15,12 @@ func (pc *Connection) handleMessage(client *pgproto3.Backend) error {
 	}
 
 	clientAddr := pc.conn.RemoteAddr().String()
+	key := pc.poolConn.Conn().PgConn().SecretKey()
+	pid := pc.poolConn.Conn().PgConn().PID()
 	switch query := msg.(type) {
 	case *pgproto3.Query:
 		log.Printf("[%s] [%s] QUERY: %s", clientAddr, pc.user, query.String)
+		log.Printf("[%s] Query connection's pid=%d, secret_key=%d", clientAddr, pid, key)
 
 	case *pgproto3.Parse:
 		log.Printf("[%s] [%s] PARSE: statement='%s' query='%s'", clientAddr, pc.user, query.Name, query.Query)

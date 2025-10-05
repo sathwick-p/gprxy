@@ -26,7 +26,6 @@ func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.Star
 	defer tempConnection.Close()
 
 	tempFrontend := pgproto3.NewFrontend(pgproto3.NewChunkReader(tempConnection), tempConnection)
-
 	log.Printf("[%s] sending startup message to PostgreSQL", clientAddr)
 	err = tempFrontend.Send(startUpMessage)
 	if err != nil {
@@ -117,6 +116,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 
 		case *pgproto3.ParameterStatus:
 			log.Printf("[%s] parameter status: %s = %s", clientAddr, authMsg.Name, authMsg.Value)
+			
 			// Forward to client
 			err := clientBackend.Send(authMsg)
 			if err != nil {
@@ -125,7 +125,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 			continue
 
 		case *pgproto3.BackendKeyData:
-			log.Printf("[%s] backend key data received", clientAddr)
+			log.Printf("[%s] backend key data received, pid=%v, secret_key=%v", clientAddr, authMsg.ProcessID, authMsg.SecretKey)
 			// Forward to client
 			*backendKeyData = authMsg
 			err := clientBackend.Send(authMsg)
