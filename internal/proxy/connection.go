@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
@@ -39,6 +40,10 @@ func (pc *Connection) handleConnection() {
 		}
 
 		if pc.poolConn != nil {
+			err := fullResetBeforeRelease(pc)
+			if err != nil {
+				logger.Error("error while releasing connection back to the pool: %v", err)
+			}
 			pc.poolConn.Release()
 			logger.Debug("released connection back to pool")
 		}
@@ -112,5 +117,19 @@ func cancelRequest(host string, cancel *pgproto3.CancelRequest) error {
 
 	logger.Debug("cancel request forwarded to backend: PID=%d, secret_key=%d",
 		cancel.ProcessID, cancel.SecretKey)
+	return nil
+}
+
+func fullResetBeforeRelease(connection *Connection) error {
+	_, err := connection.poolConn.Exec(context.Background(), "ROLLBACK")
+	if err != nil {
+		logger.Debug("unable to rollback: %v", err)
+		return err
+	}
+	_, err = connection.poolConn.Exec(context.Background(), "DISCARD ALL")
+	if err != nil {
+		logger.Debug("unable to execute discard all: %v", err)
+		return err
+	}
 	return nil
 }
