@@ -7,7 +7,6 @@ require (
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/joho/godotenv v1.5.1
 	github.com/xdg-go/scram v1.1.2
-	golang.org/x/exp v0.0.0-20251002181428-27f1f14c8bb9
 )
 
 require (
