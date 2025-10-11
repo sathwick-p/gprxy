@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
-
 )
 
 // LogLevel represents the logging level
@@ -64,6 +63,9 @@ func Error(format string, args ...interface{}) {
 // Warn logs a warning message (always shown)
 func Warn(format string, args ...interface{}) {
 	log.Printf("[WARN] "+format, args...)
+}
+func Fatal(format string, args ...interface{}) {
+	log.Fatalf("[FATAL] "+format, args...)
 }
 
 // InitFromEnv initializes logging based on environment variables

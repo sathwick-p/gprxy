@@ -1,0 +1,141 @@
+## Auth0 Configuration for PGProxy
+## This file contains the complete Auth0 tenant configuration
+## Replace placeholder values in CONFIG SECTION before deploying
+
+###############################################################################
+# CONFIG SECTION - REPLACE THESE VALUES
+###############################################################################
+# AZURE_AD_CLIENT_ID: Your Azure AD application client ID
+# AZURE_AD_CLIENT_SECRET: Your Azure AD application client secret
+# AZURE_AD_TENANT_ID: Your Azure AD tenant ID
+# ADMIN_GROUP_ID: Azure AD group ID for admin users (e.g., ada0587e-9a2f-42cf-82ec-5d7c66379b02)
+# WRITER_GROUP_ID: Azure AD group ID for writer users (e.g., 07d7a020-267c-4f07-976e-e15f2b7ee9d8)
+###############################################################################
+
+## deploy command a0deploy import --input_file tenant.yaml --config_file config.json --env --verbose
+
+tenant:
+  # Friendly name for the tenant (optional)
+  friendly_name: "PGProxy Auth0 Tenant"
+
+# API Definition
+resourceServers:
+- name: "PGProxy API"
+  identifier: "https://gprxy.io"
+  allow_offline_access: false
+  signing_alg: "RS256"
+  skip_consent_for_verifiable_first_party_clients: true
+  token_lifetime: 86400
+  token_lifetime_for_web: 7200
+  scopes:
+  - value: "connect:admin"
+    description: "Admin-level access to Postgres"
+  - value: "connect:write"
+    description: "Writer-level access"
+
+# Native Application (CLI)
+clients:
+- name: "PGProxy CLI"
+  description: "Native CLI application for PGProxy authentication"
+  app_type: "native"
+  is_first_party: true
+  oidc_conformant: true
+  callbacks:
+  - "http://localhost:8085/callback"
+  allowed_logout_urls:
+  - "http://localhost:8085/callback"
+  grant_types:
+  - "authorization_code"
+  - "refresh_token"
+  token_endpoint_auth_method: "none"
+  jwt_configuration:
+    alg: "RS256"
+    lifetime_in_seconds: 36000
+
+# Roles Definition
+roles:
+- name: "admin"
+  description: "Administrator role with platform access"
+  permissions:
+  - permission_name: "connect:platform"
+    resource_server_identifier: "https://gprxy.io"
+- name: "writer"
+  description: "Writer role with analytics access"
+  permissions:
+  - permission_name: "connect:analytics"
+    resource_server_identifier: "https://gprxy.io"
+
+# Enterprise Connection - Azure AD
+connections:
+- name: "AzureAD-PGProxy"
+  strategy: "waad"
+  enabled_clients:
+  - "PGProxy CLI"
+  options:
+    client_id: "##AZURE_AD_CLIENT_ID##"
+    client_secret: "##AZURE_AD_CLIENT_SECRET##"
+    tenant_domain: "##AZURE_AD_TENANT_ID##.onmicrosoft.com"
+    domain: "##AZURE_AD_TENANT_ID##.onmicrosoft.com"
+    domain_aliases: []
+    icon_url: "https://cdn.auth0.com/styleguide/components/1.0.8/media/logos/img/badge.png"
+    identity_api: "microsoft-identity-platform-v2.0"
+    waad_protocol: "openid-connect"
+    waad_common_endpoint: false
+    use_wsfed: false
+    use_common_endpoint: false
+    api_enable_users: true
+    basic_profile: true
+    ext_profile: true
+    ext_groups: true
+    set_user_root_attributes: "on_each_login"
+    should_trust_email_verified_connection: "never_set_emails_as_verified"
+
+# Post-Login Action
+actions:
+- name: "Map Azure AD Groups to Roles"
+  supported_triggers:
+  - id: "post-login"
+    version: "v3"
+  code: |
+    /**
+     * Auth0 Post-Login Action
+     * Maps Azure AD group IDs to Auth0 roles and injects roles into the access token
+     * Users not in allowed groups get no roles (access denied)
+     */
+
+    exports.onExecutePostLogin = async (event, api) => {
+      const namespace = "https://gprxy.io/";
+
+      // Azure AD group IDs from the token
+      const azureGroups = event.user.groups || [];
+
+      // Map specific Azure AD group IDs to Auth0 roles
+      const groupToRole = {
+        "##ADMIN_GROUP_ID##": "admin",     // AdminGroup
+        "##WRITER_GROUP_ID##": "writer"    // WriterGroup
+      };
+
+      // Compute roles
+      const roles = azureGroups.map(id => groupToRole[id]).filter(Boolean);
+
+      // Add roles to access token if user is authorized
+      if (roles.length > 0) {
+        api.accessToken.setCustomClaim(`${namespace}roles`, roles);
+        api.idToken.setCustomClaim(`${namespace}roles`, roles); // optional
+      }
+
+      // Optional: Deny login if no roles matched
+      // if (roles.length === 0) {
+      //   api.access.deny("User does not belong to an authorized group");
+      // }
+    };
+  dependencies: []
+  runtime: "node18"
+  secrets: []
+  deployed: true
+
+# Triggers - Attach action to post-login flow
+triggers:
+  post-login:
+  - action_name: "Map Azure AD Groups to Roles"
+    display_name: "Map Azure AD Groups to Roles"
