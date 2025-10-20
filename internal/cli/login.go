@@ -88,7 +88,7 @@ func buildAuthURL(code_verifier, code_challenge, state string) string {
 	params.Add("code_challenge_method", "S256")
 	params.Add("client_id", client_id)
 	params.Add("redirect_uri", callbackurl)
-	params.Add("scope", "openid profile email offline_access")
+	params.Add("scope", "openid profile email offline_access groups")
 	params.Add("audience", audience)
 	params.Add("state", state)
 	params.Add("connection", connection_name)
@@ -389,6 +389,7 @@ func login(cmd *cobra.Command, args []string) {
 	logger.Info("Authentication successful")
 
 	logger.Info("\nAccess Token: %s\n", tokens.AccessToken)
+	logger.Info("ID Token: %s\n", tokens.IDToken)
 	logger.Info("Token Type: %s\n", tokens.TokenType)
 	logger.Info("Expires In: %d seconds\n", tokens.ExpiresIn)
 	if tokens.RefreshToken != "" {

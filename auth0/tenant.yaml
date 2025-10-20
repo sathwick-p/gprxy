@@ -104,30 +104,23 @@ actions:
      */
 
     exports.onExecutePostLogin = async (event, api) => {
-      const namespace = "https://gprxy.io/";
+    const namespace = "https://gprxy.io/";
+    
+    const azureGroupIds = event.user.group_ids || [];
+    const azureGroupNames = event.user.groups || [];
+    
+    console.log("Group IDs:", JSON.stringify(azureGroupIds));
+    console.log("Group Names:", JSON.stringify(azureGroupNames));
 
-      // Azure AD group IDs from the token
-      const azureGroups = event.user.groups || [];
+    const groupToRole = {
+      "ada0587e-9a2f-42cf-82ec-5d7c66379b02": "admin",
+      "07d7a020-267c-4f07-976e-e15f2b7ee9d8": "write"
+    };
 
-      // Map specific Azure AD group IDs to Auth0 roles
-      const groupToRole = {
-        "##ADMIN_GROUP_ID##": "admin",     // AdminGroup
-        "##WRITER_GROUP_ID##": "writer"    // WriterGroup
-      };
+    const roles = azureGroupIds.map(id => groupToRole[id]).filter(Boolean);
 
-      // Compute roles
-      const roles = azureGroups.map(id => groupToRole[id]).filter(Boolean);
-
-      // Add roles to access token if user is authorized
-      if (roles.length > 0) {
-        api.accessToken.setCustomClaim(`${namespace}roles`, roles);
-        api.idToken.setCustomClaim(`${namespace}roles`, roles); // optional
-      }
-
-      // Optional: Deny login if no roles matched
-      // if (roles.length === 0) {
-      //   api.access.deny("User does not belong to an authorized group");
-      // }
+    api.accessToken.setCustomClaim('role', roles);
+    api.idToken.setCustomClaim(`role`, roles);
     };
   dependencies: []
   runtime: "node18"
