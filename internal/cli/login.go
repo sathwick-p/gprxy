@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+
 	"runtime"
 	"strconv"
 	"strings"
@@ -34,7 +36,14 @@ func init() {
 var oidc_login = &cobra.Command{
 	Use:   "login",
 	Short: "Perform OIDC token based login via cli",
-	Run:   login,
+	Long: `Authenticate using single sign-on and save credentials locally.
+
+After successful authentication, use 'gprxy connect' to connect to databases.
+Tokens are cached and automatically refreshed when needed.
+
+Your credentials are stored securely in ~/.gprxy/credentials
+`,
+	Run: login,
 }
 
 type OAuthSession struct {
@@ -328,6 +337,13 @@ func exchangeCodeForTokens(code, code_verifer string) (*TokenResponse, error) {
 }
 
 func login(cmd *cobra.Command, args []string) {
+
+	// checking if already logged in
+	if loginStatus() {
+		logger.Printf("Skipping authentication, already logged in")
+		return
+	}
+
 	logger.Printf("starting pkce login flow")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -385,14 +401,38 @@ func login(cmd *cobra.Command, args []string) {
 	if err != nil {
 		logger.Fatal("failed to exchange code for tokens: %v", err)
 	}
+	// parsing the token for user info - email, name
+
+	userInfo, err := parseIDToken(tokens.IDToken)
+	if err != nil {
+		logger.Error("failed to parse id token: %v", err)
+		userInfo = &UserInfo{Email: "unkown", Name: "unknown"}
+	}
+	// fetching the role from access token
+	accessToken, err := parseAccessToken(tokens.AccessToken)
+	if err != nil {
+		logger.Error("unabled to parse access token: %v", err)
+	} else {
+		userInfo.Roles = extractRolesFromClaims(accessToken)
+	}
+
+	// save in creds obj
+
+	creds := SavedCreds{
+		AccessToken:  tokens.AccessToken,
+		RefreshToken: tokens.RefreshToken,
+		IDToken:      tokens.IDToken,
+		ExpiresAt:    time.Now().Add(time.Duration(tokens.ExpiresIn) * time.Second),
+		IssuedAt:     time.Now(),
+		UserInfo:     *userInfo,
+	}
+
+	if err := saveCreds(&creds); err != nil {
+		logger.Fatal("failed to saved creds: %v", err)
+	}
 
 	logger.Info("Authentication successful")
-
-	logger.Info("\nAccess Token: %s\n", tokens.AccessToken)
-	logger.Info("ID Token: %s\n", tokens.IDToken)
-	logger.Info("Token Type: %s\n", tokens.TokenType)
-	logger.Info("Expires In: %d seconds\n", tokens.ExpiresIn)
-	if tokens.RefreshToken != "" {
-		logger.Info("Refresh Token: %s\n", tokens.RefreshToken)
-	}
+	logger.Info("logged in as: %s (%s), role: %v", userInfo.Name, userInfo.Email, userInfo.Roles)
+	logger.Info("token expires in : %s", creds.ExpiresAt.Format(time.RFC1123))
+	logger.Info("\nCredentials saved to: ~/.gprxy/credentials")
 }

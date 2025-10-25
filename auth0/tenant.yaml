@@ -121,6 +121,8 @@ actions:
 
     api.accessToken.setCustomClaim('role', roles);
     api.idToken.setCustomClaim(`role`, roles);
+    api.accessToken.setCustomClaim('email', event.user.email);
+
     };
   dependencies: []
   runtime: "node18"
