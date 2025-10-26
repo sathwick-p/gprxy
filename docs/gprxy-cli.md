@@ -487,3 +487,123 @@ Instead, it uses a **connection pool**:
 - Maintainable: User management in Auth0, not database
 
 This is why major cloud providers (AWS RDS Proxy, Cloud SQL Proxy, Supabase) use this exact architecture!
+
+
+## How the Refresh Token Flow Works
+
+### **Step-by-Step Explanation:**
+
+1. **User runs `gprxy connect`**
+   - The `connect()` function is called
+   - It calls `getCreds()` to get credentials
+
+2. **`getCreds()` loads credentials from disk**
+   - Reads `~/.gprxy/credentials` file
+   - Checks `ExpiresAt` timestamp
+
+3. **Token expiry check**
+   - If token expires in < 30 minutes: Needs refresh
+   - If token expires in > 30 minutes: Use existing token
+
+4. **`getRefreshToken()` is called**
+   - Loads old credentials (to get refresh token)
+   - Validates refresh token exists
+
+5. **HTTP request to Auth0**
+   - POST to `https://test-org-flow.us.auth0.com/oauth/token`
+   - Body: `grant_type=refresh_token&client_id=...&refresh_token=...`
+   - Auth0 validates the refresh token
+
+6. **Auth0 validates refresh token**
+   - Checks if refresh token is valid
+   - Checks if it hasn't been revoked
+   - Checks if it's within validity period (usually 90 days)
+
+7. **Auth0 returns new tokens**
+   - New `access_token` (valid for 24 hours)
+   - New `id_token`
+   - **May return new `refresh_token`** (rotation for security)
+
+8. **Parse and extract user info**
+   - Decode new access token
+   - Extract updated roles (in case they changed)
+   - Keep user ID, email, name from old credentials (don't change)
+
+9. **Create new credentials object**
+   - Store new access token
+   - Store new refresh token (if provided)
+   - Calculate new expiry time
+   - Update roles if changed
+
+10. **Save to disk**
+    - Write to `~/.gprxy/credentials`
+    - Secure permissions (0600)
+
+11. **Return new credentials**
+    - Function returns updated credentials
+    - `connect()` uses them to connect to database
+
+### **What Happens in Different Scenarios:**
+
+**Scenario 1: Token still valid (> 30 min left)**
+```
+getCreds() → loadCreds() → Check expiry → Still valid → Return existing creds
+```
+**No refresh needed!** Very fast (< 1ms)
+
+**Scenario 2: Token expiring soon (< 30 min left)**
+```
+getCreds() → loadCreds() → Check expiry → Expiring soon → getRefreshToken()
+→ Auth0 API call → Get new tokens → Save to disk → Return new creds
+```
+**Refresh happens automatically** (takes ~500ms for API call)
+
+**Scenario 3: Refresh token also expired**
+```
+getCreds() → loadCreds() → Check expiry → Expiring → getRefreshToken()
+→ Auth0 API call → Auth0 returns error "Invalid refresh token"
+→ Return error → User sees "Please run 'gprxy login'"
+```
+**User must re-authenticate with SSO**
+
+**Scenario 4: First time connecting after login**
+```
+gprxy login → Saves tokens → gprxy connect → getCreds() → loadCreds()
+→ Token fresh (23h 59m left) → Return existing creds
+```
+**No refresh needed**, uses token from login
+
+### **Security Considerations:**
+
+1. **Refresh tokens are long-lived** (90 days typically)
+   - If stolen, attacker has access for 90 days
+   - Mitigation: Token rotation (Auth0 issues new refresh token)
+
+2. **Access tokens are short-lived** (24 hours)
+   - If stolen, only valid for 24 hours
+   - Minimizes damage window
+
+3. **Credentials file is secure**
+   - Permissions: 0600 (only owner can read/write)
+   - Stored in `~/.gprxy/` (user's home directory)
+
+4. **Network security**
+   - All Auth0 API calls over HTTPS
+   - TLS prevents man-in-the-middle attacks
+
+5. **No password storage**
+   - Never stores user password
+   - Only stores tokens issued by Auth0
+
+### **Error Handling:**
+
+The function handles these error cases:
+
+1. **No credentials file** → "Not logged in"
+2. **No refresh token** → "Please login again"
+3. **Auth0 API error** → "Token refresh failed"
+4. **Network error** → "Failed to refresh token"
+5. **Invalid response** → "Failed to parse response"
+6. **Save failure** → Warning, but returns new creds anyway
+
+This ensures robust behavior even in edge cases!

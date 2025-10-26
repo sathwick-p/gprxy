@@ -61,6 +61,21 @@ func (connectConfig *ConnectionConfig) Validate() error {
 	defer conn.Close()
 	return nil
 }
+
+func getCreds() {
+	creds, err := loadCreds()
+	if err != nil {
+		logger.Error("Unable to load creds", err)
+	}
+	logger.Debug("loaded access token from ~/.gprxy/credentials", creds.AccessToken)
+
+	if time.Until(creds.ExpiresAt) < 30*time.Minute {
+		logger.Info("Token expiring, fetching refresh token")
+		getRefreshToken()
+
+	}
+
+}
 func connect(cmd *cobra.Command, args []string) {
 	// Connecting to the db
 	if err := connectConfig.Validate(); err != nil {
@@ -71,4 +86,7 @@ func connect(cmd *cobra.Command, args []string) {
 		connectConfig.db_host,
 		connectConfig.db_port,
 		connectConfig.db_name)
+
+	// read auth file if it exists
+
 }
