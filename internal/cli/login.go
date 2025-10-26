@@ -183,7 +183,7 @@ func startCallbackServer(ctx context.Context, session *OAuthSession) (string, er
 				</html>
 			`, errorParam)
 
-			errChan <- fmt.Errorf(errorParam + errorDesc)
+			errChan <- logger.Errorf(errorParam + errorDesc)
 			return
 		}
 
@@ -265,13 +265,13 @@ func startCallbackServer(ctx context.Context, session *OAuthSession) (string, er
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		server.Shutdown(shutdownCtx)
-		return "", fmt.Errorf("timeout waiting for authentication callback")
+		return "", logger.Errorf("timeout waiting for authentication callback")
 
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		server.Shutdown(shutdownCtx)
-		return "", fmt.Errorf("authentication cancelled: %w", ctx.Err())
+		return "", logger.Errorf("authentication cancelled: %w", ctx.Err())
 	}
 
 }
@@ -329,8 +329,8 @@ func exchangeCodeForTokens(code, code_verifer string) (*TokenResponse, error) {
 
 	var tokens TokenResponse
 	if err := json.Unmarshal(body, &tokens); err != nil {
-		logger.Error("failed to parse token response: %w", err)
-		return nil, err
+
+		return nil, logger.Errorf("failed to parse token response: %w", err)
 	}
 
 	return &tokens, nil

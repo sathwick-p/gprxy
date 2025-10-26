@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"crypto/tls"
-	"fmt"
 	"net"
 	"sync"
 
@@ -79,7 +78,7 @@ func NewServer(cfg *config.Config, tls *tls.Config) *Server {
 func (s *Server) Start() error {
 	ln, err := net.Listen("tcp", s.config.Host+":"+s.config.Port)
 	if err != nil {
-		return fmt.Errorf("failed to start proxy server: %w", err)
+		return logger.Errorf("failed to start proxy server: %w", err)
 	}
 
 	tlsStatus := "disabled"

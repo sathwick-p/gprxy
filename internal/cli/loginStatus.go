@@ -82,9 +82,21 @@ func loginStatus() bool {
 	}
 	if isExpired(creds) {
 		// Token expired, must authenticate
-		return false
+		logger.Info("Token expired, attempting auto-refresh")
+
+		// Try to refresh
+		newCreds, err := getRefreshToken()
+		if err != nil {
+			logger.Error("Auto-refresh failed: %v", err)
+			return false
+		}
+
+		logger.Info("Token auto-refreshed successfully")
+		logger.Info("Already logged in as: %s (%s)", newCreds.UserInfo.Name, newCreds.UserInfo.Email)
+		return true
 	}
-	logger.Printf("Already logged in as: %s (%s)", creds.UserInfo.Name, creds.UserInfo.Email)
+	logger.Info("Already logged in as: %s (%s)", creds.UserInfo.Name, creds.UserInfo.Email)
+	logger.Info("Token expires in: %v", time.Until(creds.ExpiresAt).Round(time.Minute))
 	return true
 
 }
@@ -162,18 +174,17 @@ func getRefreshToken() (*SavedCreds, error) {
 	logger.Info("loading existing creds")
 	oldCreds, err := loadCreds()
 	if err != nil {
-		logger.Error("failed to load creds: %v", err)
-		return nil, errors.New("not logged in, pls authenticate using gprxy login")
+		return nil, logger.Errorf("failed to load creds: %v", err)
 	}
 
 	if oldCreds.RefreshToken == "" {
-		return nil, errors.New("no refresh token found, pls authenticate using gprxy login")
+		return nil, logger.Errorf("no refresh token found, pls authenticate using gprxy login")
 	}
 
 	auth0_url := os.Getenv("AUTH0_TENANT")
 	client_id := os.Getenv("AUTH0_NATIVE_CLIENT_ID")
 	if auth0_url == "" || client_id == "" {
-		return nil, errors.New("AUTH0_TENANT or AUTH0_NATIVE_CLIENT_ID not configured")
+		return nil, logger.Errorf("AUTH0_TENANT or AUTH0_NATIVE_CLIENT_ID not configured")
 	}
 
 	refresh_url, _ := url.Parse(fmt.Sprintf("https://%s/oauth/token", auth0_url))
@@ -185,8 +196,7 @@ func getRefreshToken() (*SavedCreds, error) {
 	req, err := http.NewRequest("POST", refresh_url.String(), strings.NewReader(params.Encode()))
 
 	if err != nil {
-		logger.Error("failed to create refresh token request: %v", err)
-		return nil, errors.New("failed to create token request")
+		return nil, logger.Errorf("failed to create refresh token request: %v", err)
 	}
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -197,28 +207,24 @@ func getRefreshToken() (*SavedCreds, error) {
 
 	response, err := client.Do(req)
 	if err != nil {
-		logger.Error("failed to send refresh token request, %v", err)
-		return nil, errors.New("failed to send refresh token request")
+		return nil, logger.Errorf("failed to send refresh token request: %v", err)
 	}
 
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		logger.Error("failed to read refresh token request, %v", err)
-		return nil, errors.New("failed to read refresh token request")
+		return nil, logger.Errorf("failed to read refresh token response: %v", err)
 	}
 
 	if response.StatusCode != http.StatusOK {
-		logger.Error("token refresh failed with status %d: %s", response.StatusCode, string(body))
-		return nil, errors.New("token refresh failed")
+		return nil, logger.Errorf("token refresh failed with status %d: %s", response.StatusCode, string(body))
 	}
 
 	var tokens TokenResponse
 
 	if err := json.Unmarshal(body, &tokens); err != nil {
-		logger.Error("failed to parse new access token: %v", err)
-		return nil, errors.New("failed to parse new access token")
+		return nil, logger.Errorf("failed to parse refresh token response: %v", err)
 	}
 
 	logger.Info("token refresh successful")

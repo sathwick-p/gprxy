@@ -18,7 +18,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 
 	startupMessage, err := pgconn.ReceiveStartupMessage()
 	if err != nil {
-		return nil, fmt.Errorf("error receiving startup message: %w", err)
+		return nil, logger.Errorf("error receiving startup message: %w", err)
 	}
 
 	logger.Debug("received startup message type: %T", startupMessage)
@@ -69,7 +69,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		err = pgconn.Send(pc.key)
 		if err != nil {
 			logger.Error("failed to send BackendKeyData to client: %v", err)
-			return nil, fmt.Errorf("failed to send backend key data")
+			return nil, logger.Errorf("failed to send backend key data")
 		}
 		logger.Debug("sent pool BackendKeyData to client")
 
@@ -78,7 +78,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		err = pgconn.Send(readyMsg)
 		if err != nil {
 			logger.Error("failed to send ReadyForQuery to client: %v", err)
-			return nil, fmt.Errorf("failed to send ready for query")
+			return nil, logger.Errorf("failed to send ready for query")
 		}
 		logger.Debug("sent ReadyForQuery to client")
 
@@ -94,7 +94,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 			logger.Debug("SSL not configured, rejecting request")
 			_, err := pc.conn.Write([]byte{'N'})
 			if err != nil {
-				return nil, fmt.Errorf("failed to send SSL rejection: %w", err)
+				return nil, logger.Errorf("failed to send SSL rejection: %w", err)
 			}
 			return pc.handleStartupMessage(pgconn)
 		}
@@ -102,13 +102,13 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		logger.Debug("SSL configured, upgrading connection to TLS")
 		_, err := pc.conn.Write([]byte{'S'})
 		if err != nil {
-			return nil, fmt.Errorf("failed to send SSL acceptance: %w", err)
+			return nil, logger.Errorf("failed to send SSL acceptance: %w", err)
 		}
 
 		tlsConn := tls.Server(pc.conn, pc.tlsConfig)
 		err = tlsConn.Handshake()
 		if err != nil {
-			return nil, fmt.Errorf("TLS handshake failed: %w", err)
+			return nil, logger.Errorf("TLS handshake failed: %w", err)
 		}
 
 		logger.Debug("TLS handshake completed successfully")
@@ -124,7 +124,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		targetConn, exists := pc.server.getConnectionForCancelRequest(msg.ProcessID, msg.SecretKey)
 		if !exists {
 			logger.Warn("cancel request for unknown connection")
-			return nil, fmt.Errorf("cancel request processed - connection unknown")
+			return nil, logger.Errorf("cancel request processed - connection unknown")
 		}
 
 		logger.Debug("found target connection: user=%s, db=%s", targetConn.user, targetConn.db)
@@ -132,10 +132,10 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		err := cancelRequest(pc.config.Host, msg)
 		if err != nil {
 			logger.Error("failed to forward cancel request: %v", err)
-			return nil, fmt.Errorf("cancel request failed: %w", err)
+			return nil, logger.Errorf("cancel request failed: %w", err)
 		}
 		logger.Info("cancel request forwarded successfully")
-		return nil, fmt.Errorf("cancel request processed")
+		return nil, logger.Errorf("cancel request processed")
 	}
 
 	return pgconn, nil

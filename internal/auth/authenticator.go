@@ -59,18 +59,18 @@ func requestPasswordFromClient(clientBackend *pgproto3.Backend, clientAddr strin
 	// Ask client for cleartext password
 	err := clientBackend.Send(&pgproto3.AuthenticationCleartextPassword{})
 	if err != nil {
-		return "", fmt.Errorf("failed to request password: %w", err)
+		return "", logger.Errorf("failed to request password: %w", err)
 	}
 
 	// Receive password from client
 	msg, err := clientBackend.Receive()
 	if err != nil {
-		return "", fmt.Errorf("failed to receive password: %w", err)
+		return "", logger.Errorf("failed to receive password: %w", err)
 	}
 
 	passwordMsg, ok := msg.(*pgproto3.PasswordMessage)
 	if !ok {
-		return "", fmt.Errorf("expected PasswordMessage, got %T", msg)
+		return "", logger.Errorf("expected PasswordMessage, got %T", msg)
 	}
 	return passwordMsg.Password, nil
 }
@@ -83,7 +83,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 	for {
 		msg, err := frontend.Receive()
 		if err != nil {
-			return fmt.Errorf("failed to receive from backend: %w", err)
+			return logger.Errorf("failed to receive from backend: %w", err)
 		}
 
 		logger.Debug("backend auth message: %T", msg)
@@ -93,14 +93,14 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 			logger.Error("backend auth error: %s - %s", authMsg.Code, authMsg.Message)
 			// Forward error to client
 			clientBackend.Send(authMsg)
-			return fmt.Errorf("backend auth error: %s", authMsg.Message)
+			return logger.Errorf("backend auth error: %s", authMsg.Message)
 
 		case *pgproto3.AuthenticationOk:
 			logger.Debug("backend authentication OK")
 			// Send AuthenticationOk to client
 			err := clientBackend.Send(&pgproto3.AuthenticationOk{})
 			if err != nil {
-				return fmt.Errorf("failed to send AuthenticationOk to client: %w", err)
+				return logger.Errorf("failed to send AuthenticationOk to client: %w", err)
 			}
 			continue
 
@@ -116,7 +116,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 			// Forward to client
 			err := clientBackend.Send(authMsg)
 			if err != nil {
-				return fmt.Errorf("failed to forward ParameterStatus: %w", err)
+				return logger.Errorf("failed to forward ParameterStatus: %w", err)
 			}
 			continue
 
@@ -131,7 +131,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 			logger.Debug("backend requests cleartext password")
 			err := frontend.Send(&pgproto3.PasswordMessage{Password: password})
 			if err != nil {
-				return fmt.Errorf("failed to send cleartext password: %w", err)
+				return logger.Errorf("failed to send cleartext password: %w", err)
 			}
 
 		case *pgproto3.AuthenticationMD5Password:
@@ -147,7 +147,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 
 			err := frontend.Send(&pgproto3.PasswordMessage{Password: passwordHash})
 			if err != nil {
-				return fmt.Errorf("failed to send MD5 password: %w", err)
+				return logger.Errorf("failed to send MD5 password: %w", err)
 			}
 
 		case *pgproto3.AuthenticationSASL:
@@ -163,19 +163,19 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 			}
 
 			if !scramSupported {
-				return fmt.Errorf("SCRAM-SHA-256 not supported by backend, available: %v", authMsg.AuthMechanisms)
+				return logger.Errorf("SCRAM-SHA-256 not supported by backend, available: %v", authMsg.AuthMechanisms)
 			}
 
 			// Create SCRAM client - the proxy acts as the SCRAM client to PostgreSQL
 			client, err := scram.SHA256.NewClient(username, password, "")
 			if err != nil {
-				return fmt.Errorf("failed to create SCRAM client: %w", err)
+				return logger.Errorf("failed to create SCRAM client: %w", err)
 			}
 
 			scramConversation = client.NewConversation()
 			initialResponse, err := scramConversation.Step("")
 			if err != nil {
-				return fmt.Errorf("SCRAM initial step failed: %w", err)
+				return logger.Errorf("SCRAM initial step failed: %w", err)
 			}
 
 			logger.Debug("sending SCRAM initial response to backend")
@@ -184,36 +184,36 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
 				Data:          []byte(initialResponse),
 			})
 			if err != nil {
-				return fmt.Errorf("failed to send SASL initial response: %w", err)
+				return logger.Errorf("failed to send SASL initial response: %w", err)
 			}
 
 		case *pgproto3.AuthenticationSASLContinue:
 			logger.Debug("backend SASL continue")
 			if scramConversation == nil {
-				return fmt.Errorf("received SASL continue without conversation")
+				return logger.Errorf("received SASL continue without conversation")
 			}
 
 			response, err := scramConversation.Step(string(authMsg.Data))
 			if err != nil {
-				return fmt.Errorf("SCRAM continue step failed: %w", err)
+				return logger.Errorf("SCRAM continue step failed: %w", err)
 			}
 
 			err = frontend.Send(&pgproto3.SASLResponse{
 				Data: []byte(response),
 			})
 			if err != nil {
-				return fmt.Errorf("failed to send SASL response: %w", err)
+				return logger.Errorf("failed to send SASL response: %w", err)
 			}
 
 		case *pgproto3.AuthenticationSASLFinal:
 			logger.Debug("backend SASL final")
 			if scramConversation == nil {
-				return fmt.Errorf("received SASL final without conversation")
+				return logger.Errorf("received SASL final without conversation")
 			}
 
 			_, err := scramConversation.Step(string(authMsg.Data))
 			if err != nil {
-				return fmt.Errorf("SCRAM final step failed: %w", err)
+				return logger.Errorf("SCRAM final step failed: %w", err)
 			}
 			// Authentication complete, backend will send AuthenticationOk next
 

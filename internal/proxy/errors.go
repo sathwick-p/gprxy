@@ -1,9 +1,8 @@
 package proxy
 
 import (
-	"fmt"
-
 	"github.com/jackc/pgproto3/v2"
+	"gprxy.com/internal/logger"
 )
 
 // sendErrorToClient sends an error message to the client
@@ -15,7 +14,7 @@ func (pc *Connection) sendErrorToClient(cb *pgproto3.Backend, msg string) error 
 	}
 	err := cb.Send(errMsg)
 	if err != nil {
-		return fmt.Errorf("failed to send error to client: %w", err)
+		return logger.Errorf("failed to send error to client: %w", err)
 	}
-	return fmt.Errorf("%s", msg)
+	return logger.Errorf("%s", msg)
 }

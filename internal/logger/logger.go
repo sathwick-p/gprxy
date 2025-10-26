@@ -60,10 +60,23 @@ func Error(format string, args ...interface{}) {
 	log.Printf("[ERROR] "+format, args...)
 }
 
+// Errorf logs an error message and returns it as an error type
+func Errorf(format string, args ...interface{}) error {
+	log.Printf("[ERROR] "+format, args...)
+	return fmt.Errorf(format, args...)
+}
+
 // Warn logs a warning message (always shown)
 func Warn(format string, args ...interface{}) {
 	log.Printf("[WARN] "+format, args...)
 }
+
+// Warnf logs a warning message and returns it as an error type
+func Warnf(format string, args ...interface{}) error {
+	log.Printf("[WARN] "+format, args...)
+	return fmt.Errorf(format, args...)
+}
+
 func Fatal(format string, args ...interface{}) {
 	log.Fatalf("[FATAL] "+format, args...)
 }

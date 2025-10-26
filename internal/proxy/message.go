@@ -12,7 +12,7 @@ import (
 func (pc *Connection) handleMessage(client *pgproto3.Backend) error {
 	msg, err := client.Receive()
 	if err != nil {
-		return fmt.Errorf("client receive error: %w", err)
+		return logger.Errorf("client receive error: %w", err)
 	}
 
 	key := pc.poolConn.Conn().PgConn().SecretKey()
@@ -48,7 +48,7 @@ func (pc *Connection) handleMessage(client *pgproto3.Backend) error {
 
 	case *pgproto3.Terminate:
 		logger.Info("[%s] client disconnecting gracefully", pc.user)
-		return fmt.Errorf("client terminated")
+		return logger.Errorf("client terminated")
 
 	default:
 		logger.Debug("[%s] unknown message type: %T", pc.user, query)
@@ -56,11 +56,11 @@ func (pc *Connection) handleMessage(client *pgproto3.Backend) error {
 
 	err = pc.bf.Send(msg)
 	if err != nil {
-		return fmt.Errorf("unable to send query to backend: %w", err)
+		return logger.Errorf("unable to send query to backend: %w", err)
 	}
 
 	if _, ok := msg.(*pgproto3.Terminate); ok {
-		return fmt.Errorf("connection terminated")
+		return logger.Errorf("connection terminated")
 	}
 
 	return pc.relayBackendResponse(client)
@@ -71,12 +71,12 @@ func (pc *Connection) relayBackendResponse(client *pgproto3.Backend) error {
 	for {
 		msg, err := pc.bf.Receive()
 		if err != nil {
-			return fmt.Errorf("backend receive error: %w", err)
+			return logger.Errorf("backend receive error: %w", err)
 		}
 
 		err = client.Send(msg)
 		if err != nil {
-			return fmt.Errorf("client send error: %w", err)
+			return logger.Errorf("client send error: %w", err)
 		}
 
 		switch msgType := msg.(type) {

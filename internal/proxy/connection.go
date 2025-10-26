@@ -90,7 +90,7 @@ func cancelRequest(host string, cancel *pgproto3.CancelRequest) error {
 	backendAddr := fmt.Sprintf("%s:5432", host)
 	conn, err := net.DialTimeout("tcp", backendAddr, 5*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to connect to backend: %w", err)
+		return logger.Errorf("failed to connect to backend: %w", err)
 	}
 	defer conn.Close()
 
@@ -112,7 +112,7 @@ func cancelRequest(host string, cancel *pgproto3.CancelRequest) error {
 	_, err = conn.Write(buf)
 
 	if err != nil {
-		return fmt.Errorf("failed to send cancel: %w", err)
+		return logger.Errorf("failed to send cancel: %w", err)
 	}
 
 	logger.Debug("cancel request forwarded to backend: PID=%d, secret_key=%d",

@@ -55,14 +55,13 @@ func (connectConfig *ConnectionConfig) Validate() error {
 	target := net.JoinHostPort(connectConfig.db_host, fmt.Sprintf("%d", connectConfig.db_port))
 	conn, err := net.DialTimeout("tcp", target, 2*time.Second)
 	if err != nil {
-		logger.Error("host unreachable on port %d: %v", connectConfig.db_port, err)
-		return err
+		return logger.Errorf("host unreachable on port %d: %v", connectConfig.db_port, err)
 	}
 	defer conn.Close()
 	return nil
 }
 
-func getCreds() {
+func getCreds() (*SavedCreds, error) {
 	creds, err := loadCreds()
 	if err != nil {
 		logger.Error("Unable to load creds", err)
@@ -71,10 +70,16 @@ func getCreds() {
 
 	if time.Until(creds.ExpiresAt) < 30*time.Minute {
 		logger.Info("Token expiring, fetching refresh token")
-		getRefreshToken()
-
+		newCreds, err := getRefreshToken()
+		if err != nil {
+			return nil, logger.Errorf("Token refresh failed: %v", err)
+		}
+		logger.Info("token refreshed successfully")
+		return newCreds, nil
 	}
 
+	logger.Info("Using existing valid token (expires in %v)", time.Until(creds.ExpiresAt).Round(time.Minute))
+	return creds, nil
 }
 func connect(cmd *cobra.Command, args []string) {
 	// Connecting to the db
@@ -88,5 +93,10 @@ func connect(cmd *cobra.Command, args []string) {
 		connectConfig.db_name)
 
 	// read auth file if it exists
-
+	creds, err := getCreds()
+	if err != nil {
+		logger.Fatal("Failed to get credentials: %v", err)
+		return
+	}
+	
 }
