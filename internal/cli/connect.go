@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
+	"github.com/jackc/pgproto3/v2"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"gprxy.com/internal/logger"
@@ -81,6 +83,7 @@ func getCreds() (*SavedCreds, error) {
 	logger.Info("Using existing valid token (expires in %v)", time.Until(creds.ExpiresAt).Round(time.Minute))
 	return creds, nil
 }
+
 func connect(cmd *cobra.Command, args []string) {
 	// Connecting to the db
 	if err := connectConfig.Validate(); err != nil {
@@ -98,5 +101,32 @@ func connect(cmd *cobra.Command, args []string) {
 		logger.Fatal("Failed to get credentials: %v", err)
 		return
 	}
+	proxy_url := net.JoinHostPort(os.Getenv("PROXY_URL"), "7777")
+	conn, err := net.DialTimeout("tcp", proxy_url, 5*time.Second)
+	if err != nil {
+		logger.Error("trouble establishing connnection to the proxy: %v", err)
+	}
+	defer conn.Close()
+
+	proxyConnection := pgproto3.NewFrontend(pgproto3.NewChunkReader(conn), conn)
+	startupMessage := &pgproto3.StartupMessage{
+		ProtocolVersion: pgproto3.ProtocolVersionNumber,
+		Parameters: map[string]string{
+			"application_name": "psql",
+			"client_encoding":  "UTF8",
+			"database":         connectConfig.db_name,
+			"user":             creds.UserInfo.Email,
+		},
+	}
+	err = proxyConnection.Send(startupMessage)
+	if err!=nil{
+		logger.Error("failed to send startup message: %v", err)
+	}
+
+	msg, _ := proxyConnection.Receive()
+
+	logger.Debug("proxy sent back: %v", msg)
+
 	
+
 }
