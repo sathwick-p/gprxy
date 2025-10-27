@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"gprxy.com/internal/logger"
+	"gprxy.com/internal/tls"
 )
 
 type ConnectionConfig struct {
@@ -68,7 +69,7 @@ func getCreds() (*SavedCreds, error) {
 	if err != nil {
 		logger.Error("Unable to load creds", err)
 	}
-	logger.Debug("loaded access token from ~/.gprxy/credentials", creds.AccessToken)
+	logger.Debug("loaded access token from ~/.gprxy/credentials")
 
 	if time.Until(creds.ExpiresAt) < 30*time.Minute {
 		logger.Info("Token expiring, fetching refresh token")
@@ -108,6 +109,11 @@ func connect(cmd *cobra.Command, args []string) {
 	}
 	defer conn.Close()
 
+	conn, err = tls.UpgradeToTLS(conn, os.Getenv("PROXY_URL"))
+	if err != nil {
+		logger.Fatal("TLS upgrade failed: %v", err)
+	}
+
 	proxyConnection := pgproto3.NewFrontend(pgproto3.NewChunkReader(conn), conn)
 	startupMessage := &pgproto3.StartupMessage{
 		ProtocolVersion: pgproto3.ProtocolVersionNumber,
@@ -119,7 +125,7 @@ func connect(cmd *cobra.Command, args []string) {
 		},
 	}
 	err = proxyConnection.Send(startupMessage)
-	if err!=nil{
+	if err != nil {
 		logger.Error("failed to send startup message: %v", err)
 	}
 
@@ -127,6 +133,11 @@ func connect(cmd *cobra.Command, args []string) {
 
 	logger.Debug("proxy sent back: %v", msg)
 
-	
-
+	pmsg := &pgproto3.PasswordMessage{
+		Password: creds.AccessToken,
+	}
+	err = proxyConnection.Send(pmsg)
+	if err != nil {
+		logger.Error("failed to send pmsg message: %v", err)
+	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"gprxy.com/internal/logger"
 )
+// Implements server side tls configuration for the proxy - It handles and configures tls for incoming connections from clients and when client connects and sends SSLRequest the proxy uses this config to upgrade connection to TLS
 
 // Load loads TLS configuration from environment variables
 // Returns nil if TLS is not configured (allowing proxy to run without TLS)
