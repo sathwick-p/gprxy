@@ -16,7 +16,7 @@ import (
 // AuthenticateUser authenticates a user with PostgreSQL using a temporary connection
 // The proxy acts as a PostgreSQL client and handles all authentication methods (SCRAM, MD5, etc.)
 func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.StartupMessage, clientBackend *pgproto3.Backend, clientAddr string) (pgproto3.BackendKeyData, error) {
-	backendAddress := host + ":5432"
+	backendAddress := net.JoinHostPort(host, "5432")
 	logger.Debug("connecting to PostgreSQL at %s as %s for authentication", backendAddress, user)
 
 	tempConnection, err := net.DialTimeout("tcp", backendAddress, 10*time.Second)
