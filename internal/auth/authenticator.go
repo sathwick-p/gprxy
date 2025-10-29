@@ -7,10 +7,17 @@ import (
 	"net"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgproto3/v2"
 	"github.com/xdg-go/scram"
 
+	"strings"
+
 	"gprxy.com/internal/logger"
+)
+
+var(
+	jwtValidator *JWTValidator
 )
 
 // AuthenticateUser authenticates a user with PostgreSQL using a temporary connection
@@ -41,6 +48,16 @@ func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.Star
 		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Authentication failed")
 	}
 
+	// Checking if it's a JWT token
+	if strings.HasPrefix(password, "eyJ") && strings.Count(password, ".") == 2 {
+		logger.Debug("jwt token received")
+
+		oauth, err := jwtValidator.ValidateJWT(password)
+		if err!= nil{
+			logger.Errorf("jwt validation failed: %v", err)
+			return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Invalid authentication token")
+		}
+	}
 	// Now authenticate WITH PostgreSQL using the password
 	var backendKeyData *pgproto3.BackendKeyData
 	err = authenticateWithBackend(tempFrontend, clientBackend, user, password, clientAddr, &backendKeyData)

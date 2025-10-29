@@ -3,6 +3,7 @@ module gprxy.com
 go 1.24.2
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/jackc/pgproto3/v2 v2.3.3
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/joho/godotenv v1.5.1
