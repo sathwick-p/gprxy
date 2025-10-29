@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/jackc/pgproto3/v2"
 	"github.com/xdg-go/scram"
 
