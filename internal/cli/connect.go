@@ -3,8 +3,10 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"gprxy/internal/logger"
@@ -167,7 +169,13 @@ func connect(cmd *cobra.Command, args []string) {
 			logger.Info("✓ Connection established successfully!")
 			logger.Info("Database: %s, User: %s", connectConfig.db_name, creds.UserInfo.Email)
 			logger.Info("Connection is ready for queries (TxStatus: %c)", v.TxStatus)
-			logger.Info("\nNote: This is a diagnostic tool. Use 'gprxy psql' for interactive sessions.")
+			logger.Info("\nStarting interactive session...")
+
+			// Start interactive session - relay messages bidirectionally
+			err := startInteractiveSession(conn, proxyConnection)
+			if err != nil {
+				logger.Error("Interactive session error: %v", err)
+			}
 			return
 
 		case *pgproto3.ErrorResponse:
@@ -178,4 +186,52 @@ func connect(cmd *cobra.Command, args []string) {
 			logger.Debug("Received message: %T", msg)
 		}
 	}
+}
+
+// startInteractiveSession creates a bidirectional relay between stdin/stdout and the proxy
+func startInteractiveSession(rawConn net.Conn, frontend *pgproto3.Frontend) error {
+	logger.Info("Interactive session started. Press Ctrl+C to exit.")
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, 2)
+
+	// Goroutine 1: Copy from stdin to proxy (client -> proxy)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		written, err := io.Copy(rawConn, os.Stdin)
+		if err != nil {
+			errChan <- fmt.Errorf("stdin->proxy error: %w", err)
+			return
+		}
+		logger.Debug("Stdin closed, wrote %d bytes", written)
+	}()
+
+	// Goroutine 2: Copy from proxy to stdout (proxy -> client)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		written, err := io.Copy(os.Stdout, rawConn)
+		if err != nil {
+			errChan <- fmt.Errorf("proxy->stdout error: %w", err)
+			return
+		}
+		logger.Debug("Proxy connection closed, wrote %d bytes", written)
+	}()
+
+	// Wait for either goroutine to finish or error
+	go func() {
+		wg.Wait()
+		close(errChan)
+	}()
+
+	// Return the first error (if any)
+	for err := range errChan {
+		if err != nil {
+			return err
+		}
+	}
+
+	logger.Info("Interactive session ended")
+	return nil
 }

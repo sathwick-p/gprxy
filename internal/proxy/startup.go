@@ -1,9 +1,9 @@
 package proxy
 
 import (
-	"context"
+
 	"crypto/tls"
-	"fmt"
+
 	"time"
 
 	"github.com/jackc/pgproto3/v2"
@@ -43,12 +43,12 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 			logger.Error("failed to connect to backend: %v", err)
 			return nil, pc.sendErrorToClient(pgconn, "Database unavailable")
 		}
-		_, err = pc.poolConn.Exec(context.Background(), fmt.Sprintf("SET ROLE %s", user))
-		if err != nil {
-			pc.poolConn.Conn().Close(context.Background())
-			return nil, pc.sendErrorToClient(pgconn, "failed to assume user role")
+		// _, err = pc.poolConn.Exec(context.Background(), fmt.Sprintf("SET ROLE %s", user))
+		// if err != nil {
+		// 	pc.poolConn.Conn().Close(context.Background())
+		// 	return nil, pc.sendErrorToClient(pgconn, "failed to assume user role")
 
-		}
+		// }
 		logger.Debug("backend connection established in %v", time.Since(start))
 		underlyingConn := pc.poolConn.Conn().PgConn().Conn()
 
