@@ -18,24 +18,24 @@ gprxy implements **PostgreSQL-native SSL/TLS encryption** for client-to-proxy co
 
 ### Key Features
 
-✅ **PostgreSQL Protocol Compliance**: Implements standard SSL negotiation
-✅ **TLS 1.2/1.3 Support**: Modern encryption standards
-✅ **Optional TLS**: Works with and without TLS configuration
-✅ **Zero Downtime**: TLS upgrade happens on-demand per connection
-✅ **Proper Error Handling**: Clear error messages for TLS failures
-✅ **Production Ready**: Tested with modern cipher suites
+- **PostgreSQL Protocol Compliance**: Implements standard SSL negotiation
+- **TLS 1.2/1.3 Support**: Modern encryption standards
+- **Optional TLS**: Works with and without TLS configuration
+- **Zero Downtime**: TLS upgrade happens on-demand per connection
+- **Proper Error Handling**: Clear error messages for TLS failures
+- **Production Ready**: Tested with modern cipher suites
 
 ### Encryption Scope
 
 ```
-┌─────────┐    TLS ✅     ┌───────┐    Plain TCP    ┌────────────┐
+┌─────────┐    TLS       ┌───────┐    Plain TCP    ┌────────────┐
 │ Client  │ ────────────> │ Proxy │ ──────────────> │ PostgreSQL │
 └─────────┘   Encrypted   └───────┘   (Backend)     └────────────┘
 ```
 
 **Current Implementation:**
-- ✅ Client → Proxy: **TLS Encrypted** (this guide)
-- ⚠️ Proxy → PostgreSQL: **Plain TCP** (future enhancement)
+- Client → Proxy: **TLS Encrypted** (this guide)
+- Proxy → PostgreSQL: **Plain TCP** (future enhancement)
 
 ---
 
@@ -431,14 +431,14 @@ psql "postgresql://user@localhost:7777/db?sslmode=prefer"
 
 ### 1. Certificate Management
 
-✅ **DO:**
+**DO:**
 - Use strong private keys (RSA 2048+ or ECDSA P-256+)
 - Protect private keys with file permissions (`chmod 600`)
 - Rotate certificates before expiration
 - Use certificates from trusted CAs in production
 - Include proper Subject Alternative Names
 
-❌ **DON'T:**
+**DON'T:**
 - Commit private keys to version control
 - Use self-signed certs in production
 - Use weak algorithms (RSA 1024, MD5, SHA-1)
@@ -447,7 +447,7 @@ psql "postgresql://user@localhost:7777/db?sslmode=prefer"
 
 ### 2. TLS Configuration
 
-✅ **Current Implementation (Good):**
+**Current Implementation (Good):**
 ```go
 config := &tls.Config{
     MinVersion:   tls.VersionTLS12,  // TLS 1.2+
@@ -563,15 +563,15 @@ echo "=========================="
 
 # Test 1: TLS connection
 echo "Test 1: TLS Connection (sslmode=require)"
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=require" -c "SELECT 'TLS works!' AS result" && echo "✓ PASS" || echo "✗ FAIL"
+PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=require" -c "SELECT 'TLS works!' AS result" && echo "PASS" || echo "FAIL"
 
 # Test 2: Non-TLS connection
 echo "Test 2: Non-TLS Connection (sslmode=disable)"
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=disable" -c "SELECT 'Plain TCP works!' AS result" && echo "✓ PASS" || echo "✗ FAIL"
+PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=disable" -c "SELECT 'Plain TCP works!' AS result" && echo "PASS" || echo "FAIL"
 
 # Test 3: TLS preference
 echo "Test 3: TLS Preference (sslmode=prefer)"
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=prefer" -c "SELECT version()" && echo "✓ PASS" || echo "✗ FAIL"
+PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=prefer" -c "SELECT version()" && echo "PASS" || echo "FAIL"
 
 echo "=========================="
 echo "Testing complete!"
@@ -660,13 +660,13 @@ ls -l certs/
 - Use returned pgconn in query loop
 
 ```go
-// ✓ CORRECT
+// CORRECT
 pgc, err := pc.handleStartupMessage(pgc)  // Capture returned pgconn
 for {
     pc.handleMessage(pgc)  // Use updated pgconn
 }
 
-// ✗ WRONG
+// WRONG
 pc.handleStartupMessage(pgc)  // Ignoring returned pgconn
 for {
     pc.handleMessage(pgc)  // Using old pgconn!
@@ -831,7 +831,7 @@ type TLSMetrics struct {
 
 ## Summary
 
-### What We've Implemented ✅
+### What We've Implemented
 
 1. **PostgreSQL-compliant SSL negotiation**
 2. **TLS 1.2/1.3 support with modern ciphers**

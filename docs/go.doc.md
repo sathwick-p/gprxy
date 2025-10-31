@@ -1042,10 +1042,10 @@ Reality: Different auth types expect different message types:
 
 | PostgreSQL Sends | Client Should Send | Your Code Forwards |
 |------------------|-------------------|--------------------|
-| `AuthenticationMD5Password` | `PasswordMessage` | ✅ `PasswordMessage` |
-| `AuthenticationSASL` | `SASLInitialResponse` | ❌ `PasswordMessage` |
-| `AuthenticationSASLContinue` | `SASLResponse` | ❌ `PasswordMessage` |
-| `AuthenticationSASLFinal` | (Nothing) | ❌ Waits for response |
+| `AuthenticationMD5Password` | `PasswordMessage` | `PasswordMessage` |
+| `AuthenticationSASL` | `SASLInitialResponse` | `PasswordMessage` |
+| `AuthenticationSASLContinue` | `SASLResponse` | `PasswordMessage` |
+| `AuthenticationSASLFinal` | (Nothing) | Waits for response |
 
 ##### The Message Discrepancy Source
 

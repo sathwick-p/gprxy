@@ -1,6 +1,6 @@
-# 🏗️ **Complete RDS Proxy Architecture & Code Flow Analysis**
+# Architecture and Code Flow
 
-## **🎯 Overview: Dual-Connection Architecture**
+## Overview: Dual-Connection Architecture
 
 Your proxy uses a **dual-connection architecture**:
 1. **Temporary Connection**: For client authentication (disposable)
@@ -8,11 +8,11 @@ Your proxy uses a **dual-connection architecture**:
 
 ---
 
-# 📋 **Step-by-Step Code Flow**
+# Step-by-Step Code Flow
 
-## **Phase 1: Server Initialization**
+## Phase 1: Server Initialization
 
-### **1.1 Configuration Loading (`main.go` → `config.Load()`)**
+### 1.1 Configuration Loading (`main.go` → `config.Load()`)
 ```go
 // main.go
 cfg := config.Load()  // Loads from .env file
@@ -25,7 +25,7 @@ server.Start()
 - Creates service user credentials for backend connections
 - **Service User Role**: Acts as the "proxy identity" for database connections
 
-### **1.2 Server Startup (`proxy.Start()`)**
+### 1.2 Server Startup (`proxy.Start()`)
 ```go
 // proxy.go:40-56
 ln, err := net.Listen("tcp", s.config.Host+":"+s.config.Port)
@@ -40,9 +40,9 @@ for {
 
 ---
 
-## **Phase 2: Client Connection Establishment**
+## Phase 2: Client Connection Establishment
 
-### **2.1 Client Connection (`psql -h localhost -p 7777 -U testuser2 -d cloudfront_data`)**
+### 2.1 Client Connection (`psql -h localhost -p 7777 -U testuser2 -d cloudfront_data`)
 
 ```
 Client (psql) → Proxy (port 7777)
@@ -53,7 +53,7 @@ Client (psql) → Proxy (port 7777)
 - Proxy creates `Connection` struct for this client
 - Spawns dedicated goroutine: `go pc.handleConnection()`
 
-### **2.2 Connection Handling (`handleConnection()`)**
+### 2.2 Connection Handling (`handleConnection()`)
 ```go
 // proxy.go:62-85
 func (pc *Connection) handleConnection() {
@@ -74,15 +74,15 @@ func (pc *Connection) handleConnection() {
 
 ---
 
-## **Phase 3: Startup Message Processing**
+## Phase 3: Startup Message Processing
 
-### **3.1 SSL Request Handling**
+### 3.1 SSL Request Handling
 ```
 Client → Proxy: SSLRequest
 Proxy → Client: 'N' (SSL rejected)
 ```
 
-### **3.2 Startup Message Processing (`handleStartupMessage()`)**
+### 3.2 Startup Message Processing (`handleStartupMessage()`)
 ```go
 // proxy.go:95-155
 startupMessage, err := pgconn.ReceiveStartupMessage()
@@ -101,14 +101,14 @@ case *pgproto3.StartupMessage:
 
 ---
 
-## **Phase 4: Authentication Process (Proxy-Mediated Authentication)**
+## Phase 4: Authentication Process (Proxy-Mediated Authentication)
 
-> **⚠️ IMPORTANT UPDATE**: The authentication approach has been completely redesigned to support SCRAM-SHA-256. 
-> See [scram-authentication-fix.md](./scram-authentication-fix.md) for full details.
+> IMPORTANT: The authentication approach has been redesigned to support SCRAM-SHA-256.
+> See [auth-scram.md](./auth-scram.md) for full details.
 
-### **4.1 New Authentication Architecture**
+### 4.1 New Authentication Architecture
 
-**Paradigm Shift**: The proxy now **performs authentication itself** rather than transparently relaying messages.
+Paradigm shift: the proxy now performs authentication itself rather than transparently relaying messages.
 
 ```
 ┌────────┐                              ┌───────┐                              ┌──────────┐
@@ -124,13 +124,13 @@ case *pgproto3.StartupMessage:
 - Proxy acts as **PostgreSQL client** to backend (performs SCRAM/MD5)
 - This solves TLS channel binding issues with SCRAM-SHA-256-PLUS
 
-### **4.2 Authentication Initiation**
+### 4.2 Authentication Initiation
 ```go
 // internal/proxy/startup.go
 err := auth.AuthenticateUser(user, database, pc.config.Host, msg, pgconn, clientAddr)
 ```
 
-### **4.3 Temporary Connection Creation**
+### 4.3 Temporary Connection Creation
 ```go
 // internal/auth/authenticator.go
 backendAddress := host + ":5432"
@@ -143,7 +143,7 @@ tempFrontend := pgproto3.NewFrontend(pgproto3.NewChunkReader(tempConnection), te
 - Doesn't affect connection pool
 - Closed after auth completes
 
-### **4.4 Request Password from Client**
+### 4.4 Request Password from Client
 ```go
 // NEW: Proxy requests password from client
 func requestPasswordFromClient(clientBackend *pgproto3.Backend) (string, error) {
@@ -164,7 +164,7 @@ Client → Proxy: PasswordMessage { password: "user_password" }
 
 **Security**: Password sent over TLS-encrypted connection
 
-### **4.5 Authenticate WITH Backend**
+### 4.5 Authenticate WITH Backend
 ```go
 // NEW: Proxy performs authentication as PostgreSQL client
 func authenticateWithBackend(frontend *pgproto3.Frontend, username, password string) error {
@@ -196,7 +196,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, username, password str
 PostgreSQL: Validates and responds "AuthenticationOk"
 ```
 
-### **4.5 Authentication Completion**
+### 4.5 Authentication Completion
 ```go
 // auth.go:50
 log.Printf("[%s] authentication completed successfully", clientAddr)
@@ -207,9 +207,9 @@ log.Printf("[%s] authentication completed successfully", clientAddr)
 
 ---
 
-## **Phase 5: Service User Pool Connection**
+## Phase 5: Service User Pool Connection
 
-### **5.1 Backend Connection Establishment**
+### 5.1 Backend Connection Establishment
 ```go
 // proxy.go:131
 err = pc.connectBackend(database, user)
@@ -217,7 +217,7 @@ err = pc.connectBackend(database, user)
 
 **Architecture Shift**: Now we switch from client credentials to **service user credentials**!
 
-### **5.2 Pool Connection Creation (`connectBackend()`)**
+### 5.2 Pool Connection Creation (`connectBackend()`)
 ```go
 // proxy.go:164-177
 func (pc *Connection) connectBackend(database, user string) error {
@@ -233,7 +233,7 @@ func (pc *Connection) connectBackend(database, user string) error {
 - **Authentication**: Used client credentials (`testuser2`)
 - **Query Execution**: Uses service user credentials (`testuser` from .env)
 
-### **5.3 Pool Manager (`pool.AcquireConnection()`)**
+### 5.3 Pool Manager (`pool.AcquireConnection()`)
 ```go
 // pool.go:108-128
 func AcquireConnection(user, password, database, host string) (*pgxpool.Conn, error) {
@@ -258,9 +258,9 @@ poolManager = map[poolKey]*poolInfo{
 
 ---
 
-## **Phase 6: Query Execution Setup**
+## Phase 6: Query Execution Setup
 
-### **6.1 Protocol Bridge Setup**
+### 6.1 Protocol Bridge Setup
 ```go
 // proxy.go:145-150
 underlyingConn := pc.poolConn.Conn().PgConn().Conn()
@@ -275,7 +275,7 @@ pc.db = database
 Client ←→ Proxy ←→ PostgreSQL Pool Connection (Service User)
 ```
 
-### **6.2 Query Loop Entry**
+### 6.2 Query Loop Entry
 ```go
 // proxy.go:152
 log.Printf("[%s] entering query handling loop", clientAddr)
@@ -286,9 +286,9 @@ for {
 
 ---
 
-## **Phase 7: Query Processing**
+## Phase 7: Query Processing
 
-### **7.1 Query Reception (`handleMessage()`)**
+### 7.1 Query Reception (`handleMessage()`)
 ```go
 // proxy.go:179-220
 msg, err := client.Receive()  // Get query from client
@@ -301,7 +301,7 @@ case *pgproto3.Parse:
 }
 ```
 
-### **7.2 Query Forwarding**
+### 7.2 Query Forwarding
 ```go
 // proxy.go:245
 err = pc.bf.Send(msg)  // Forward to pooled connection
@@ -312,7 +312,7 @@ err = pc.bf.Send(msg)  // Forward to pooled connection
 - Proxy forwards to PostgreSQL via **service user connection**
 - PostgreSQL executes as **service user** (not client user!)
 
-### **7.3 Response Relay (`relayBackendResponse()`)**
+### 7.3 Response Relay (`relayBackendResponse()`)
 ```go
 // proxy.go:254-285
 for {
@@ -330,7 +330,7 @@ for {
 
 ---
 
-# 🔄 **Complete Data Flow Summary**
+# Complete Data Flow Summary
 
 ## **Authentication Phase:**
 ```
@@ -350,7 +350,7 @@ for {
 
 ---
 
-# 🏗️ **Architecture Components**
+# Architecture Components
 
 ## **1. Connection Types**
 - **Client Connection**: `psql` ↔ Proxy (port 7777)
@@ -369,7 +369,7 @@ for {
 
 ---
 
-# 🚨 **Current Architecture Limitations**
+# Current Architecture Limitations
 
 ## **1. Identity Loss**
 - Client authenticates as `testuser2`
@@ -387,7 +387,7 @@ for {
 
 ---
 
-# 💡 **Why This Architecture Exists**
+# Why This Architecture Exists
 
 ## **Benefits:**
 1. **Connection Pooling**: Efficient resource usage

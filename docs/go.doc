@@ -43,7 +43,7 @@ For production/automated use (where this pattern doesn't occur):
 For interactive terminal use:
 - This is normal and expected behavior
 - No fix needed
-- See docs/psql-behavior.md and docs/connection-behavior-analysis.md for detailed explanation
+- See docs/connection-behavior.md for a detailed explanation
 
 **Bottom line**: The proxy is working correctly. Move forward with OIDC auth implementation!
 
