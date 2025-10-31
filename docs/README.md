@@ -4,6 +4,9 @@ This folder contains the technical documentation for the PostgreSQL proxy.
 
 ## Table of contents
 
+- User guide
+  - [Comprehensive User Guide](./user-guide.md)
+
 - Overview and architecture
   - [Architecture and Code Flow](./architecture.md)
 
