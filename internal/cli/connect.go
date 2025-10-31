@@ -139,6 +139,43 @@ func connect(cmd *cobra.Command, args []string) {
 	}
 	err = proxyConnection.Send(pmsg)
 	if err != nil {
-		logger.Error("failed to send pmsg message: %v", err)
+		logger.Fatal("failed to send password message: %v", err)
+		return
+	}
+
+	// Wait for authentication to complete and handle all protocol messages
+	logger.Debug("Waiting for authentication response...")
+
+	for {
+		msg, err := proxyConnection.Receive()
+		if err != nil {
+			logger.Fatal("Failed to receive from proxy: %v", err)
+			return
+		}
+
+		switch v := msg.(type) {
+		case *pgproto3.AuthenticationOk:
+			logger.Info("✓ Authentication successful!")
+
+		case *pgproto3.ParameterStatus:
+			logger.Debug("Parameter: %s = %s", v.Name, v.Value)
+
+		case *pgproto3.BackendKeyData:
+			logger.Debug("Backend key data: PID=%d, SecretKey=%d", v.ProcessID, v.SecretKey)
+
+		case *pgproto3.ReadyForQuery:
+			logger.Info("✓ Connection established successfully!")
+			logger.Info("Database: %s, User: %s", connectConfig.db_name, creds.UserInfo.Email)
+			logger.Info("Connection is ready for queries (TxStatus: %c)", v.TxStatus)
+			logger.Info("\nNote: This is a diagnostic tool. Use 'gprxy psql' for interactive sessions.")
+			return
+
+		case *pgproto3.ErrorResponse:
+			logger.Fatal("Authentication failed: [%s] %s", v.Code, v.Message)
+			return
+
+		default:
+			logger.Debug("Received message: %T", msg)
+		}
 	}
 }
