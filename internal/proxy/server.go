@@ -5,8 +5,8 @@ import (
 	"net"
 	"sync"
 
-	"gprxy.com/internal/config"
-	"gprxy.com/internal/logger"
+	"gprxy/internal/config"
+	"gprxy/internal/logger"
 )
 
 // Server represents the proxy server

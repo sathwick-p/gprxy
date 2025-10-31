@@ -11,8 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"gprxy/internal/logger"
+
 	"github.com/golang-jwt/jwt/v5"
-	"gprxy.com/internal/logger"
 )
 
 type JWTValidator struct {

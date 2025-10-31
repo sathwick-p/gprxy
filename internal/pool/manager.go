@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gprxy.com/internal/logger"
+	"gprxy/internal/logger"
 )
 
 type poolKey struct {

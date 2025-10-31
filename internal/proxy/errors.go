@@ -1,8 +1,9 @@
 package proxy
 
 import (
+	"gprxy/internal/logger"
+
 	"github.com/jackc/pgproto3/v2"
-	"gprxy.com/internal/logger"
 )
 
 // sendErrorToClient sends an error message to the client

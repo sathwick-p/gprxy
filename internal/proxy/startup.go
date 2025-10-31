@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgproto3/v2"
 
-	"gprxy.com/internal/auth"
-	"gprxy.com/internal/logger"
+	"gprxy/internal/auth"
+	"gprxy/internal/logger"
 )
 
 // handleStartupMessage handles the initial client startup message

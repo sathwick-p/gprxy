@@ -1,7 +1,7 @@
 package pool
 
 import (
-	"gprxy.com/internal/logger"
+	"gprxy/internal/logger"
 )
 
 // LogPoolStats logs statistics for the given database pool

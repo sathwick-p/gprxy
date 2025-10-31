@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"net"
 
-	"gprxy.com/internal/logger"
+	"gprxy/internal/logger"
 )
 
 func UpgradeToTLS(conn net.Conn, serverName string) (net.Conn, error) {

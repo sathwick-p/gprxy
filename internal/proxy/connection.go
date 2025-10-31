@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgproto3/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"gprxy.com/internal/config"
-	"gprxy.com/internal/logger"
-	"gprxy.com/internal/pool"
+	"gprxy/internal/config"
+	"gprxy/internal/logger"
+	"gprxy/internal/pool"
 )
 
 // Connection represents a single client-proxy connection

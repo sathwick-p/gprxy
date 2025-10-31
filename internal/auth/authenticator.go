@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgproto3/v2"
 	"github.com/xdg-go/scram"
 
-	"gprxy.com/internal/logger"
+	"gprxy/internal/logger"
 )
 
 var (

@@ -23,9 +23,10 @@ import (
 
 	"io"
 
+	"gprxy/internal/logger"
+
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
-	"gprxy.com/internal/logger"
 )
 
 func init() {

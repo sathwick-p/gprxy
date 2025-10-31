@@ -5,7 +5,7 @@ import (
 
 	"github.com/jackc/pgproto3/v2"
 
-	"gprxy.com/internal/logger"
+	"gprxy/internal/logger"
 )
 
 // handleMessage handles incoming client messages after authentication

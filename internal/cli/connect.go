@@ -7,11 +7,12 @@ import (
 	"os"
 	"time"
 
+	"gprxy/internal/logger"
+	"gprxy/internal/tls"
+
 	"github.com/jackc/pgproto3/v2"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
-	"gprxy.com/internal/logger"
-	"gprxy.com/internal/tls"
 )
 
 type ConnectionConfig struct {

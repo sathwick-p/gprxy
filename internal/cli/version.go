@@ -1,8 +1,9 @@
 package cli
 
 import (
+	"gprxy/internal/logger"
+
 	"github.com/spf13/cobra"
-	"gprxy.com/internal/logger"
 )
 
 func init() {

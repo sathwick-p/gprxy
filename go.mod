@@ -1,4 +1,4 @@
-module gprxy.com
+module gprxy
 
 go 1.24.2
 

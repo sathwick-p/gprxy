@@ -5,12 +5,13 @@ import (
 	"log"
 	"os"
 
+	"gprxy/internal/auth"
+	"gprxy/internal/config"
+	"gprxy/internal/logger"
+	"gprxy/internal/proxy"
+	"gprxy/internal/tls"
+
 	"github.com/spf13/cobra"
-	"gprxy.com/internal/auth"
-	"gprxy.com/internal/config"
-	"gprxy.com/internal/logger"
-	"gprxy.com/internal/proxy"
-	"gprxy.com/internal/tls"
 )
 
 func init() {

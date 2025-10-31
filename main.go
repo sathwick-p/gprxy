@@ -1,8 +1,8 @@
 package main
 
 import (
-	"gprxy.com/internal/cli"
-	"gprxy.com/internal/logger"
+	"gprxy/internal/cli"
+	"gprxy/internal/logger"
 )
 
 func main() {

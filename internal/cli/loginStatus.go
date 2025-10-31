@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"gprxy.com/internal/logger"
+	"gprxy/internal/logger"
 )
 
 type SavedCreds struct {

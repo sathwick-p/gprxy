@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"gprxy.com/internal/logger"
+	"gprxy/internal/logger"
 )
 
 // RoleMapper maps OAuth roles to PostgreSQL service accounts
@@ -31,7 +31,7 @@ func NewRoleMapper() (*RoleMapper, error) {
 	}
 
 	// Load role mappings from environment variables
-	
+
 	if err := mapper.loadFromEnvironment(); err != nil {
 		return nil, err
 	}
