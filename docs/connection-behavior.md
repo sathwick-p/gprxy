@@ -176,7 +176,7 @@ Step 3: REAL CONNECTION (connection 2)
 ┌──────────────────────────────────────┐
 │ psql → StartupMessage                │
 │ Server → AuthenticationMD5Password   │
-│ psql → PasswordMessage (ready!)      │  ← Password already prepared
+│ psql → PasswordMessage (ready)       │  ← Password already prepared
 │ Server → AuthenticationOK            │
 └──────────────────────────────────────┘
 ```
@@ -430,6 +430,6 @@ Your analysis was spot-on:
 
 This is **exactly** what's happening. Not a proxy bug - standard psql behavior. 
 
-**Case closed!**
+**Case closed.**
 
 

@@ -80,7 +80,7 @@ Developer 1 (Alice)               Developer 2 (Bob)
 
 
 
-Excellent question! Let me explain in **complete detail** how the proxy handles authentication in this OAuth setup, step by step.
+This section explains how the proxy handles authentication in this OAuth setup.
 
 ## Complete Proxy Authentication Flow (No Code)
 
@@ -316,14 +316,14 @@ The JWT has three parts separated by dots: `header.payload.signature`
 
 ### **Phase 7: Connection Pooling (Critical for Scale)**
 
-**Proxy doesn't create a new PostgreSQL connection every time!**
+The proxy doesn't create a new PostgreSQL connection every time.
 
 Instead, it uses a **connection pool**:
 
 1. Proxy checks: Do I have a pool for `app_writer@myapp`?
 2. If pool exists:
    - Check: Are there idle connections in the pool?
-   - If yes: Grab one (reuse existing connection) ← FAST!
+   - If yes: Grab one (reuse existing connection) ← fast
    - If no: Create new connection (max 50 per pool)
 3. If pool doesn't exist:
    - Create new pool for `app_writer@myapp`
@@ -413,7 +413,7 @@ Instead, it uses a **connection pool**:
 5. Proxy closes client connection
 6. Logs: "Connection closed for alice@company.com, duration: 15m"
 
-**The PostgreSQL connection stays alive in the pool!**
+The PostgreSQL connection stays alive in the pool.
 - Next user with "write" role can reuse this connection
 - Proxy will set new session variables for that user
 - Connection pooling keeps database efficient
@@ -486,7 +486,7 @@ Instead, it uses a **connection pool**:
 - Scalable: Add more proxy pods as needed
 - Maintainable: User management in Auth0, not database
 
-This is why major cloud providers (AWS RDS Proxy, Cloud SQL Proxy, Supabase) use this exact architecture!
+This is why major cloud providers (AWS RDS Proxy, Cloud SQL Proxy, Supabase) use this architecture.
 
 
 ## How the Refresh Token Flow Works
@@ -549,7 +549,7 @@ This is why major cloud providers (AWS RDS Proxy, Cloud SQL Proxy, Supabase) use
 ```
 getCreds() → loadCreds() → Check expiry → Still valid → Return existing creds
 ```
-**No refresh needed!** Very fast (< 1ms)
+No refresh needed. Very fast (< 1ms)
 
 **Scenario 2: Token expiring soon (< 30 min left)**
 ```

@@ -1,5 +1,5 @@
 
-# TLS/SSL Implementation in gprxy - Complete Guide
+# TLS/SSL in gprxy
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -199,7 +199,7 @@ func Load() *tls.Config {
 
 ```go
 func (s *Server) Start() error {
-    // Plain TCP listener (not TLS listener!)
+    // Plain TCP listener (not a TLS listener)
     ln, err := net.Listen("tcp", s.config.Host+":"+s.config.Port)
     
     // Log TLS status
@@ -563,18 +563,18 @@ echo "=========================="
 
 # Test 1: TLS connection
 echo "Test 1: TLS Connection (sslmode=require)"
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=require" -c "SELECT 'TLS works!' AS result" && echo "PASS" || echo "FAIL"
+PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=require" -c "SELECT 'TLS works' AS result" && echo "PASS" || echo "FAIL"
 
 # Test 2: Non-TLS connection
 echo "Test 2: Non-TLS Connection (sslmode=disable)"
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=disable" -c "SELECT 'Plain TCP works!' AS result" && echo "PASS" || echo "FAIL"
+PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=disable" -c "SELECT 'Plain TCP works' AS result" && echo "PASS" || echo "FAIL"
 
 # Test 3: TLS preference
 echo "Test 3: TLS Preference (sslmode=prefer)"
 PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=prefer" -c "SELECT version()" && echo "PASS" || echo "FAIL"
 
 echo "=========================="
-echo "Testing complete!"
+echo "Testing complete."
 ```
 
 ---

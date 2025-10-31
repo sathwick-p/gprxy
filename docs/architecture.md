@@ -189,7 +189,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, username, password str
             frontend.Send(&pgproto3.PasswordMessage{Password: hash})
             
         case *pgproto3.AuthenticationOk:
-            return nil  // Success!
+            return nil  // Success
         }
     }
 }
@@ -215,7 +215,7 @@ log.Printf("[%s] authentication completed successfully", clientAddr)
 err = pc.connectBackend(database, user)
 ```
 
-**Architecture Shift**: Now we switch from client credentials to **service user credentials**!
+**Architecture Shift**: Now we switch from client credentials to **service user credentials**
 
 ### 5.2 Pool Connection Creation (`connectBackend()`)
 ```go
@@ -310,7 +310,7 @@ err = pc.bf.Send(msg)  // Forward to pooled connection
 **What happens:**
 - Client sends: `SELECT * FROM users;`
 - Proxy forwards to PostgreSQL via **service user connection**
-- PostgreSQL executes as **service user** (not client user!)
+- PostgreSQL executes as **service user** (not client user)
 
 ### 7.3 Response Relay (`relayBackendResponse()`)
 ```go

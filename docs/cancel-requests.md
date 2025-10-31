@@ -420,7 +420,7 @@ Let's trace a complete flow from connection establishment through query cancella
    
    // SCRAM authentication performed
    // BackendKeyData received: PID=12345, SecretKey=98765
-   // BUT NOT SENT TO CLIENT!
+   // Not sent to client
    
    case *pgproto3.BackendKeyData:
        logger.Debug("temp auth connection backend key data received (will not forward): PID=%d", 
@@ -446,7 +446,7 @@ Let's trace a complete flow from connection establishment through query cancella
 
 6. **Send pool's BackendKeyData to client**
    ```go
-   // This is the CRITICAL step!
+   // Critical step
    err = pgconn.Send(pc.key)  // Sends PID=67890, Key=54321
    logger.Debug("sent pool BackendKeyData to client")
    
@@ -543,7 +543,7 @@ Let's trace a complete flow from connection establishment through query cancella
     ```
     PostgreSQL Backend: Received cancel request
     PostgreSQL Backend: Validating PID=67890, Key=54321
-    PostgreSQL Backend: Match found! Sending SIGINT to process 67890
+    PostgreSQL Backend: Match found. Sending SIGINT to process 67890
     Process 67890: Query interrupted, sending ErrorResponse
     ```
 

@@ -52,7 +52,7 @@ When the client attempts SCRAM-SHA-256-PLUS authentication:
 1. Backend advertises: `[SCRAM-SHA-256-PLUS, SCRAM-SHA-256]`
 2. Client tries to use SCRAM-SHA-256-PLUS with channel binding from TLS Session #1
 3. Backend expects channel binding from TLS Session #2
-4. **Mismatch!** Authentication fails or client falls back to wrong method
+4. **Mismatch.** Authentication fails or client falls back to wrong method
 
 ### 2. Client Library Confusion
 
@@ -214,7 +214,7 @@ func authenticateWithBackend(frontend *pgproto3.Frontend, clientBackend *pgproto
             scramConversation.Step(string(authMsg.Data))
             
         case *pgproto3.AuthenticationOk:
-            // Success! Forward to client
+            // Success. Forward to client
             clientBackend.Send(&pgproto3.AuthenticationOk{})
             
         case *pgproto3.ReadyForQuery:
@@ -560,7 +560,7 @@ WHERE rolname = 'testuser_scram';
 
 ### Proxy Configuration
 
-No special configuration needed! The proxy automatically:
+No special configuration needed. The proxy automatically:
 - Detects the authentication method from the backend
 - Performs appropriate authentication
 - Supports all methods transparently

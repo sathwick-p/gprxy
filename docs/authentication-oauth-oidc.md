@@ -106,7 +106,7 @@ Per-Connection:
     │  Extract roles from custom claims
     │
     └─ 4. Map to PostgreSQL role and authenticate
-        (No network call to Auth0!)
+        (No network call to Auth0.)
 ```
 
 ---
@@ -861,7 +861,7 @@ Background Refresh:
 - Auth negotiation: 30-50ms
 
 **Optimization**:
-- Connection pooling reuse: ~2-5ms (much faster!)
+- Connection pooling reuse: ~2-5ms (much faster)
 - Batch connections to same role
 - Implement proxy-level connection keep-alive
 
