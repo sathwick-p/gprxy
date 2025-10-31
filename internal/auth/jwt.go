@@ -48,6 +48,19 @@ type JWK struct {
 	Alg string `json:"alg"`
 }
 
+func NewJWTValidator(issuer, audience, jwksURL string) *JWTValidator {
+	return &JWTValidator{
+		issuer:       issuer,
+		audience:     audience,
+		jwksURL:      jwksURL,
+		publicKeys:   make(map[string]*rsa.PublicKey),
+		keysCacheTTL: 1 * time.Hour,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+	}
+}
+
 func (v *JWTValidator) ValidateJWT(authToken string) (*OAuthContext, error) {
 	token, err := jwt.Parse(authToken, func(t *jwt.Token) (interface{}, error) {
 

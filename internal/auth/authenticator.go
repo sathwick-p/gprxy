@@ -5,20 +5,32 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
-
 
 	"github.com/jackc/pgproto3/v2"
 	"github.com/xdg-go/scram"
 
-
-
 	"gprxy.com/internal/logger"
 )
 
-// var(
-// 	jwtValidator *JWTValidator
-// )
+var (
+	jwtValidator *JWTValidator
+	roleMapper   *RoleMapper
+)
+
+func initializeAuth(issuer, audience, jwksurl string) error {
+	jwtValidator = NewJWTValidator(issuer, audience, jwksurl)
+	var err error
+	roleMapper, err = NewRoleMapper()
+	if err != nil {
+		logger.Errorf("failed to initalise role mapping")
+
+	}
+	logger.Info("authentication initalised (issuer: %s, aud: %s)", issuer, audience)
+	logger.Info("configured roles: %v", roleMapper.GetAllRoles())
+	return nil
+}
 
 // AuthenticateUser authenticates a user with PostgreSQL using a temporary connection
 // The proxy acts as a PostgreSQL client and handles all authentication methods (SCRAM, MD5, etc.)
@@ -33,6 +45,41 @@ func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.Star
 	}
 	defer tempConnection.Close()
 
+	// First, ask the client for their password
+	password, err := requestPasswordFromClient(clientBackend, clientAddr)
+	if err != nil {
+		logger.Error("failed to get password from client: %v", err)
+		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Authentication failed")
+	}
+	var actualUsername, actualPassword string
+	// Checking if it's a JWT token
+	if strings.HasPrefix(password, "eyJ") && strings.Count(password, ".") == 2 {
+		logger.Debug("jwt token received")
+
+		oauth, err := jwtValidator.ValidateJWT(password)
+		if err != nil {
+			logger.Errorf("jwt validation failed: %v", err)
+			return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Invalid authentication token")
+		}
+		svcAcc, err := roleMapper.MapRoleToServiceAccount(oauth.Roles)
+		if err != nil {
+			logger.Errorf("role mapping failed for user %s: %v", oauth.Email, err)
+			return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Access denied: no valid roles")
+		}
+
+		oauth.ServiceAccount = svcAcc.Username
+		actualUsername = svcAcc.Username
+		actualPassword = svcAcc.Password
+
+		logger.Info("user %s (roles: %v) mapped to service account: %s",
+			oauth.Email, oauth.Roles, svcAcc.Username)
+	} else {
+		// Traditional password authentication (fallback)
+		logger.Debug("Traditional password authentication for user: %s", user)
+		actualUsername = user
+		actualPassword = password
+	}
+	startUpMessage.Parameters["user"] = actualUsername
 	tempFrontend := pgproto3.NewFrontend(pgproto3.NewChunkReader(tempConnection), tempConnection)
 	logger.Debug("sending startup message to PostgreSQL")
 	err = tempFrontend.Send(startUpMessage)
@@ -41,23 +88,6 @@ func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.Star
 		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Authentication failed")
 	}
 
-	// First, ask the client for their password
-	password, err := requestPasswordFromClient(clientBackend, clientAddr)
-	if err != nil {
-		logger.Error("failed to get password from client: %v", err)
-		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Authentication failed")
-	}
-
-	// Checking if it's a JWT token
-	// if strings.HasPrefix(password, "eyJ") && strings.Count(password, ".") == 2 {
-	// 	logger.Debug("jwt token received")
-
-	// 	oauth, err := jwtValidator.ValidateJWT(password)
-	// 	if err!= nil{
-	// 		logger.Errorf("jwt validation failed: %v", err)
-	// 		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Invalid authentication token")
-	// 	}
-	// }
 	// Now authenticate WITH PostgreSQL using the password
 	var backendKeyData *pgproto3.BackendKeyData
 	err = authenticateWithBackend(tempFrontend, clientBackend, user, password, clientAddr, &backendKeyData)
