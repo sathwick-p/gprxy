@@ -19,15 +19,16 @@ var (
 	roleMapper   *RoleMapper
 )
 
-func initializeAuth(issuer, audience, jwksurl string) error {
+// InitializeAuth initializes JWT validation and role mapping
+// Call this once during proxy startup
+func InitializeAuth(issuer, audience, jwksurl string) error {
 	jwtValidator = NewJWTValidator(issuer, audience, jwksurl)
 	var err error
 	roleMapper, err = NewRoleMapper()
 	if err != nil {
-		logger.Errorf("failed to initalise role mapping")
-
+		return logger.Errorf("failed to initialize role mapping: %w", err)
 	}
-	logger.Info("authentication initalised (issuer: %s, aud: %s)", issuer, audience)
+	logger.Info("authentication initialized (issuer: %s, aud: %s)", issuer, audience)
 	logger.Info("configured roles: %v", roleMapper.GetAllRoles())
 	return nil
 }
@@ -88,9 +89,9 @@ func AuthenticateUser(user, database, host string, startUpMessage *pgproto3.Star
 		return pgproto3.BackendKeyData{}, sendErrorToClient(clientBackend, "Authentication failed")
 	}
 
-	// Now authenticate WITH PostgreSQL using the password
+	// Now authenticate WITH PostgreSQL using the service account credentials
 	var backendKeyData *pgproto3.BackendKeyData
-	err = authenticateWithBackend(tempFrontend, clientBackend, user, password, clientAddr, &backendKeyData)
+	err = authenticateWithBackend(tempFrontend, clientBackend, actualUsername, actualPassword, clientAddr, &backendKeyData)
 	if err != nil {
 		logger.Error("authentication with backend failed: %v", err)
 		return pgproto3.BackendKeyData{}, err

@@ -228,12 +228,12 @@ func (v *JWTValidator) getPublicKey(kid string) (*rsa.PublicKey, error) {
 		// check if still valid
 
 		if time.Since(v.lastKeysFetch) < v.keysCacheTTL {
-			v.keysMutex.Unlock()
+			v.keysMutex.RUnlock()
 			return key, nil
 		}
 	}
 
-	v.keysMutex.Unlock()
+	v.keysMutex.RUnlock()
 
 	// fetch new keys
 	v.keysMutex.Lock()
@@ -297,7 +297,7 @@ func (v *JWTValidator) fetchJWKS() error {
 		}
 
 		// decoding exponent (e)
-		eBytes, err := base64.URLEncoding.DecodeString(jwk.E)
+		eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
 		if err != nil {
 			return logger.Errorf("failed to decode e: %v", err)
 		}
