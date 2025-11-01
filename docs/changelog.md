@@ -661,7 +661,7 @@ GRANT ALL PRIVILEGES ON DATABASE postgres TO testuser;
 And lo and behold, when I connect with this:
 
 ```bash
-psql "postgresql://testuser@localhost:7777/postgres"
+PGPASSWORD="<JWT>" psql -h localhost -p 7777 -U user@company.com -d postgres
 ```
 
 the password auth worked fine and I was in the DB without any errors. So now we know that this was the actual issue.

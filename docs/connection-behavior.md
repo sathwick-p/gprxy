@@ -57,7 +57,7 @@ Result: Single connection (password cached)
 ### Option 2: Use PGPASSWORD environment variable
 
 ```bash
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres"
+PGPASSWORD="<JWT>" psql -h localhost -p 7777 -U user@company.com -d postgres
 ```
 
 Result: Single connection (password provided upfront)
@@ -234,7 +234,7 @@ psql "postgresql://testuser:testpass@localhost:7777/postgres"
 ### Option 2: PGPASSWORD Environment Variable
 
 ```bash
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres"
+PGPASSWORD="<JWT>" psql -h localhost -p 7777 -U user@company.com -d postgres
 ```
 
 **Result**: Single connection

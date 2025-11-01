@@ -395,23 +395,23 @@ GPRXY_PASS=your_service_password
 
 ```bash
 # Require TLS (fail if TLS not available)
-psql "postgresql://user@localhost:7777/db?sslmode=require"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/db?sslmode=require"
 
 # Verify certificate (production)
-psql "postgresql://user@localhost:7777/db?sslmode=verify-full&sslrootcert=/path/to/ca.crt"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/db?sslmode=verify-full&sslrootcert=/path/to/ca.crt"
 
 # Verify CA only (no hostname check)
-psql "postgresql://user@localhost:7777/db?sslmode=verify-ca&sslrootcert=/path/to/ca.crt"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/db?sslmode=verify-ca&sslrootcert=/path/to/ca.crt"
 ```
 
 #### Without TLS
 
 ```bash
 # Disable TLS (plain TCP)
-psql "postgresql://user@localhost:7777/db?sslmode=disable"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/db?sslmode=disable"
 
 # Prefer TLS but allow plain (default)
-psql "postgresql://user@localhost:7777/db?sslmode=prefer"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/db?sslmode=prefer"
 ```
 
 ### SSL Modes Explained
@@ -508,7 +508,7 @@ log.Printf("[%s] Client certificate: %v", addr, tlsConn.ConnectionState().PeerCe
 #### Test 1: TLS Connection
 ```bash
 # Connect with TLS
-psql "postgresql://testuser@localhost:7777/postgres?sslmode=require"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/postgres?sslmode=require"
 
 # Expected log output:
 # [127.0.0.1:xxxxx] SSL request received
@@ -519,7 +519,7 @@ psql "postgresql://testuser@localhost:7777/postgres?sslmode=require"
 #### Test 2: Non-TLS Connection
 ```bash
 # Connect without TLS
-psql "postgresql://testuser@localhost:7777/postgres?sslmode=disable"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/postgres?sslmode=disable"
 
 # Expected log output:
 # [127.0.0.1:xxxxx] received startup message type: *pgproto3.StartupMessage
@@ -529,7 +529,7 @@ psql "postgresql://testuser@localhost:7777/postgres?sslmode=disable"
 #### Test 3: Certificate Verification
 ```bash
 # Verify certificate
-psql "postgresql://testuser@localhost:7777/postgres?sslmode=verify-full&sslrootcert=certs/ca.crt"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/postgres?sslmode=verify-full&sslrootcert=certs/ca.crt"
 
 # Should fail with self-signed cert if hostname doesn't match
 ```
@@ -563,15 +563,15 @@ echo "=========================="
 
 # Test 1: TLS connection
 echo "Test 1: TLS Connection (sslmode=require)"
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=require" -c "SELECT 'TLS works' AS result" && echo "PASS" || echo "FAIL"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/postgres?sslmode=require" -c "SELECT 'TLS works' AS result" && echo "PASS" || echo "FAIL"
 
 # Test 2: Non-TLS connection
 echo "Test 2: Non-TLS Connection (sslmode=disable)"
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=disable" -c "SELECT 'Plain TCP works' AS result" && echo "PASS" || echo "FAIL"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/postgres?sslmode=disable" -c "SELECT 'Plain TCP works' AS result" && echo "PASS" || echo "FAIL"
 
 # Test 3: TLS preference
 echo "Test 3: TLS Preference (sslmode=prefer)"
-PGPASSWORD=testpass psql "postgresql://testuser@localhost:7777/postgres?sslmode=prefer" -c "SELECT version()" && echo "PASS" || echo "FAIL"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/postgres?sslmode=prefer" -c "SELECT version()" && echo "PASS" || echo "FAIL"
 
 echo "=========================="
 echo "Testing complete."
@@ -616,13 +616,13 @@ psql: error: SSL error: certificate verify failed
 **Solutions:**
 ```bash
 # For self-signed certs, use sslmode=require (no verification)
-psql "postgresql://user@localhost:7777/db?sslmode=require"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/db?sslmode=require"
 
 # For CA verification, specify CA file
-psql "postgresql://user@localhost:7777/db?sslmode=verify-ca&sslrootcert=certs/ca.crt"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/db?sslmode=verify-ca&sslrootcert=certs/ca.crt"
 
 # For full verification, ensure hostname matches certificate CN/SAN
-psql "postgresql://user@proxy.example.com:7777/db?sslmode=verify-full&sslrootcert=certs/ca.crt"
+PGPASSWORD="<JWT>" psql "postgresql://user@proxy.example.com:7777/db?sslmode=verify-full&sslrootcert=certs/ca.crt"
 ```
 
 #### Issue 3: Permission Denied on Certificate Files
@@ -867,7 +867,7 @@ export PROXY_CERT=certs/postgres.crt
 export PROXY_KEY=certs/postgres.key
 
 # Test
-psql "postgresql://user@localhost:7777/db?sslmode=require"
+PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/db?sslmode=require"
 ```
 
 ---

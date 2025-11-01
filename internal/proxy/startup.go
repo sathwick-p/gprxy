@@ -1,15 +1,14 @@
 package proxy
 
 import (
-
 	"crypto/tls"
 
 	"time"
 
-	"github.com/jackc/pgproto3/v2"
-
 	"gprxy/internal/auth"
 	"gprxy/internal/logger"
+
+	"github.com/jackc/pgproto3/v2"
 )
 
 // handleStartupMessage handles the initial client startup message

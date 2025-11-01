@@ -141,7 +141,7 @@ See: auth-scram.md
 
 ### 2) OAuth/OIDC (JWT via Auth0)
 - Client uses gprxy CLI to get and cache tokens
-- CLI connects to the proxy and sends the JWT as the "password"
+- Client connects with psql and sends the JWT as the "password"
 - Proxy validates JWT locally (JWKS cache), extracts roles
 - Roles are mapped to a PostgreSQL service account
 - Queries run under that service account via pooling
@@ -208,20 +208,14 @@ What it does:
 - Saves access/refresh tokens and basic user info to ~/.gprxy/credentials
 - Handles auto-refresh when the token nears expiration
 
-### Connect to a database
+### Connect to the proxy with psql (recommended)
 ```bash
-# Required: --host (-s) and --database (-d)
-./gprxy connect -s proxy.host.example -d mydb -p 7777
+PGPASSWORD="<JWT>" psql -h <proxy-host> -p 7777 -U <user-email> -d <database>
 ```
 Notes:
-- The CLI connects to $PROXY_URL:7777 (set PROXY_URL in your env) and speaks PostgreSQL wire protocol
-- It sends the JWT token as a PasswordMessage
-- On success, it opens an interactive session relaying stdin/stdout to the proxy connection
-
-Flags (connect):
-- --host, -s: Database or proxy hostname (required)
-- --database, -d: Database name (required)
-- --port, -p: Port (default 5432 for validation; proxy is 7777 at runtime)
+- Use your JWT access token as the password via PGPASSWORD
+- Set -U to your login email (e.g., alice@company.com)
+- Port is 7777 (the proxy)
 
 ## Client behavior and tips
 
@@ -268,7 +262,7 @@ go build -o gprxy .
 
 5) Connect to a database through the proxy
 ```bash
-./gprxy connect -s localhost -d postgres
+PGPASSWORD="<JWT>" psql -h localhost -p 7777 -U <user-email> -d postgres
 ```
 
 

@@ -42,7 +42,7 @@ for {
 
 ## Phase 2: Client Connection Establishment
 
-### 2.1 Client Connection (`psql -h localhost -p 7777 -U testuser2 -d cloudfront_data`)
+### 2.1 Client Connection (`PGPASSWORD="<JWT>" psql -h localhost -p 7777 -U user@company.com -d cloudfront_data`)
 
 ```
 Client (psql) → Proxy (port 7777)
@@ -401,5 +401,3 @@ for {
 3. **Service User Permissions**: Needs broad database access
 
 This architecture is common in **connection pooling proxies** where the focus is on **performance and resource management** rather than **user identity preservation**. Your recent improvements with connection state checking help solve the client disconnection issues during the authentication handoff phase.
-
-

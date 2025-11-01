@@ -56,7 +56,7 @@ gprxy
 
 Developer 1 (Alice)               Developer 2 (Bob)
   │                                     │
-  │ psql "host=proxy.svc port=5432     │ psql "host=proxy.svc port=5432
+  │ psql "host=proxy.svc port=7777     │ psql "host=proxy.svc port=7777
   │       password=<alice_jwt_token>"   │       password=<bob_jwt_token>"
   │                                     │
   └──────────────┬──────────────────────┘
@@ -102,7 +102,7 @@ The proxy acts as a **trusted intermediary** that:
 
 **What happens on user's laptop:**
 
-1. User runs: `gprxy psql -d myapp`
+1. User runs: `PGPASSWORD="<JWT>" psql -h <proxy-host> -p 7777 -U <user-email> -d myapp`
 2. CLI tool reads `~/.gprxy/credentials` file
 3. Extracts the JWT access token (long string starting with "eyJ...")
 4. Checks if token is expired (compares expiry time to now)
@@ -467,7 +467,7 @@ The PostgreSQL connection stays alive in the pool.
 ## Why This Design is Powerful
 
 **User Perspective:**
-- Simple: Just run `gprxy psql -d mydb`
+- Simple: Just run `PGPASSWORD="<JWT>" psql -h <proxy-host> -p 7777 -U <user-email> -d mydb`
 - Secure: Uses company SSO (Auth0/Azure AD)
 - Seamless: Works like normal psql
 

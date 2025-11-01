@@ -760,7 +760,7 @@ Let's trace a complete flow from connection establishment through query cancella
 
 2. **Connect and run long query**:
    ```bash
-   psql "postgresql://testuser@localhost:7777/postgres?sslmode=require"
+   PGPASSWORD="<JWT>" psql "postgresql://user@localhost:7777/postgres?sslmode=require"
    ```
    ```sql
    SELECT pg_sleep(60);

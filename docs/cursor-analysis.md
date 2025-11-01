@@ -683,7 +683,7 @@ Cancel requests: always send the `(pid, secret)` from the attached backend; on `
 
 - psql
   - `gprxy login --aad` → stores token in OS keychain.
-  - `gprxy psql -h proxy.example -U "user@company.com" dbname` (CLI sets PGPASSWORD to token and launches psql).
+  - `PGPASSWORD="<JWT>" psql -h proxy.example -p 7777 -U user@company.com -d dbname` (use JWT as password).
 - DBeaver
   - Use standard Postgres driver.
   - Host = proxy, user = email, password = output of `gprxy get-token` (or point to sidecar localhost).
@@ -1142,7 +1142,7 @@ The proxy acts as a **trusted intermediary** that:
 
 **What happens on user's laptop:**
 
-1. User runs: `gprxy psql -d myapp`
+1. User runs: `PGPASSWORD="<JWT>" psql -h <proxy-host> -p 7777 -U <user-email> -d myapp`
 2. CLI tool reads `~/.gprxy/credentials` file
 3. Extracts the JWT access token (long string starting with "eyJ...")
 4. Checks if token is expired (compares expiry time to now)
@@ -1507,7 +1507,7 @@ Instead, it uses a **connection pool**:
 ## Why This Design is Powerful
 
 **User Perspective:**
-- Simple: Just run `gprxy psql -d mydb`
+- Simple: Just run `PGPASSWORD="<JWT>" psql -h <proxy-host> -p 7777 -U <user-email> -d mydb`
 - Secure: Uses company SSO (Auth0/Azure AD)
 - Seamless: Works like normal psql
 
