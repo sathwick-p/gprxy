@@ -30,7 +30,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 		logger.Info("connection request - user: %s, database: %s, app: %s",
 			user, database, appName)
 
-		keyData, err := auth.AuthenticateUser(user, database, pc.config.Host, msg, pgconn, clientAddr)
+		keyData, err := auth.AuthenticateUser(user, database, pc.config.DBHost, msg, pgconn, clientAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -128,7 +128,7 @@ func (pc *Connection) handleStartupMessage(pgconn *pgproto3.Backend) (*pgproto3.
 
 		logger.Debug("found target connection: user=%s, db=%s", targetConn.user, targetConn.db)
 
-		err := cancelRequest(pc.config.Host, msg)
+		err := cancelRequest(pc.config.DBHost, msg)
 		if err != nil {
 			logger.Error("failed to forward cancel request: %v", err)
 			return nil, logger.Errorf("cancel request failed: %w", err)

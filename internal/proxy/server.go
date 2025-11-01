@@ -76,7 +76,8 @@ func NewServer(cfg *config.Config, tls *tls.Config) *Server {
 
 // Start starts the proxy server and listens for client connections
 func (s *Server) Start() error {
-	ln, err := net.Listen("tcp", s.config.Host+":"+s.config.Port)
+	listenAddr := net.JoinHostPort(s.config.ProxyHost, s.config.ProxyPort)
+	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return logger.Errorf("failed to start proxy server: %w", err)
 	}

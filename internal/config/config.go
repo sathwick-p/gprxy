@@ -10,8 +10,9 @@ import (
 
 // Config holds all configuration for the proxy
 type Config struct {
-	Host        string
-	Port        string
+	ProxyHost   string // Proxy listen address
+	ProxyPort   string // Proxy listen port
+	DBHost      string // PostgreSQL database host
 	ServiceUser string
 	ServicePass string
 }
@@ -23,9 +24,21 @@ func Load() *Config {
 		log.Println("No .env file found, using system environment")
 	}
 
-	host := os.Getenv("DB_HOST")
-	if host == "" {
-		host = "localhost"
+	// Proxy listen configuration
+	proxyHost := os.Getenv("PROXY_HOST")
+	if proxyHost == "" {
+		proxyHost = "0.0.0.0" // Listen on all interfaces by default
+	}
+
+	proxyPort := os.Getenv("PROXY_PORT")
+	if proxyPort == "" {
+		proxyPort = "7777"
+	}
+
+	// PostgreSQL database host
+	dbHost := os.Getenv("DB_HOST")
+	if dbHost == "" {
+		dbHost = "localhost"
 	}
 
 	serviceUser := os.Getenv("GPRXY_USER")
@@ -39,8 +52,9 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Host:        host,
-		Port:        "7777",
+		ProxyHost:   proxyHost,
+		ProxyPort:   proxyPort,
+		DBHost:      dbHost,
 		ServiceUser: serviceUser,
 		ServicePass: servicePass,
 	}
@@ -52,7 +66,7 @@ func (c *Config) BuildConnectionString(database string) string {
 		"postgres://%s:%s@%s:5432/%s",
 		c.ServiceUser,
 		c.ServicePass,
-		c.Host,
+		c.DBHost,
 		database,
 	)
 }
