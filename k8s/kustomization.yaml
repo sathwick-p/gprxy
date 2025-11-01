@@ -10,7 +10,7 @@ resources:
 - configmap.yaml
 - deployment.yaml
 - service.yaml
-- hpa.yaml
+- service-nlb.yaml
 
 commonLabels:
   app: gprxy

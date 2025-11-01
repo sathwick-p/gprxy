@@ -1120,7 +1120,7 @@ Please understand and answer my questions in detail
 
 
 
-Excellent question! Let me explain in **complete detail** how the proxy handles authentication in this OAuth setup, step by step.
+This section explains how the proxy handles authentication in this OAuth setup.
 
 ## Complete Proxy Authentication Flow (No Code)
 
@@ -1252,7 +1252,7 @@ The JWT has three parts separated by dots: `header.payload.signature`
 15. Proxy computes SHA-256 hash of this combined string
 16. Proxy uses RSA public key to decrypt the signature part
 17. Compares: Does decrypted signature match the hash?
-18. If they match: Token was signed by Auth0 ✓ (nobody else could forge this)
+18. If they match: Token was signed by Auth0 (signature verified)
 19. If they don't match: Token is fake/tampered → Reject connection
 
 **Step 5: Verify the claims**
@@ -1343,7 +1343,7 @@ The JWT has three parts separated by dots: `header.payload.signature`
 13. PostgreSQL verifies the proof against stored password hash
 14. PostgreSQL sends: "AuthenticationSASLFinal" with server signature
 15. Proxy verifies server signature (mutual authentication)
-16. PostgreSQL sends: "AuthenticationOk" ✓
+16. PostgreSQL sends: "AuthenticationOk"
 
 **Connection established to PostgreSQL:**
 
@@ -1356,14 +1356,14 @@ The JWT has three parts separated by dots: `header.payload.signature`
 
 ### **Phase 7: Connection Pooling (Critical for Scale)**
 
-**Proxy doesn't create a new PostgreSQL connection every time!**
+The proxy doesn't create a new PostgreSQL connection every time.
 
 Instead, it uses a **connection pool**:
 
 1. Proxy checks: Do I have a pool for `app_writer@myapp`?
 2. If pool exists:
    - Check: Are there idle connections in the pool?
-   - If yes: Grab one (reuse existing connection) ← FAST!
+   - If yes: Grab one (reuse existing connection) ← fast
    - If no: Create new connection (max 50 per pool)
 3. If pool doesn't exist:
    - Create new pool for `app_writer@myapp`
@@ -1487,20 +1487,22 @@ Instead, it uses a **connection pool**:
 
 ### **What the Proxy Does NOT Do:**
 
-❌ **Store user credentials** (stateless, reads from JWT each time)
-❌ **Call Auth0 for every connection** (validates cryptographically with cached keys)
-❌ **Create database users per person** (uses shared service accounts)
-❌ **Modify SQL queries** (just forwards them, RLS happens in PostgreSQL)
-❌ **Store state between requests** (can scale horizontally in Kubernetes)
+Does not:
+- Store user credentials (stateless, reads from JWT each time)
+- Call Auth0 for every connection (validates cryptographically with cached keys)
+- Create database users per person (uses shared service accounts)
+- Modify SQL queries (just forwards them, RLS happens in PostgreSQL)
+- Store state between requests (can scale horizontally in Kubernetes)
 
 ### **Security Properties:**
 
-✅ **Defense in Depth**: Multiple layers (JWT validation, PostgreSQL auth, RLS)
-✅ **Zero Trust**: Every connection validated independently
-✅ **Audit Trail**: Full logging of who accessed what
-✅ **Least Privilege**: Users get minimum required permissions
-✅ **Scalability**: Stateless proxy pods can be replicated
-✅ **Isolation**: RLS ensures users can't see each other's data
+Provides:
+- Defense in depth: Multiple layers (JWT validation, PostgreSQL auth, RLS)
+- Zero trust: Every connection validated independently
+- Audit trail: Logging of who accessed what
+- Least privilege: Users get minimum required permissions
+- Scalability: Stateless proxy pods can be replicated
+- Isolation: RLS ensures users can't see each other's data
 
 ---
 
