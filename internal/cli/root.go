@@ -6,9 +6,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	version = "dev"
+)
+
 var rootCommand = &cobra.Command{
-	Use:   "gprxy",
-	Short: "Go client based Postgresql Proxy for RDS",
+	Use:     "gprxy",
+	Short:   "Go client based Postgresql Proxy for RDS",
+	Version: version,
+}
+
+func SetVersion(v string) {
+	version = v
+	rootCommand.Version = v
 }
 
 func Execute() {

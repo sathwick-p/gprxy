@@ -1,0 +1,219 @@
+name: Release CLI and Container
+
+on:
+  push:
+    tags:
+    - 'v*.*.*' # Trigger on version tags like v1.0.0, v1.2.3
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-cli:
+    name: Build CLI Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+        - os: linux
+          arch: amd64
+        - os: linux
+          arch: arm64
+        - os: darwin
+          arch: amd64
+        - os: darwin
+          arch: arm64
+        - os: windows
+          arch: amd64
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.os }}
+        GOARCH: ${{ matrix.arch }}
+        CGO_ENABLED: 0
+      run: |
+        OUTPUT_NAME=gprxy-${{ matrix.os }}-${{ matrix.arch }}
+        if [ "${{ matrix.os }}" = "windows" ]; then
+          OUTPUT_NAME="${OUTPUT_NAME}.exe"
+        fi
+        go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o $OUTPUT_NAME .
+
+    - name: Create tarball (non-Windows)
+      if: matrix.os != 'windows'
+      run: |
+        tar -czf gprxy-${{ matrix.os }}-${{ matrix.arch }}.tar.gz gprxy-${{ matrix.os }}-${{ matrix.arch }}
+        sha256sum gprxy-${{ matrix.os }}-${{ matrix.arch }}.tar.gz > gprxy-${{ matrix.os }}-${{ matrix.arch }}.tar.gz.sha256
+
+    - name: Create zip (Windows)
+      if: matrix.os == 'windows'
+      run: |
+        zip gprxy-${{ matrix.os }}-${{ matrix.arch }}.zip gprxy-${{ matrix.os }}-${{ matrix.arch }}.exe
+        sha256sum gprxy-${{ matrix.os }}-${{ matrix.arch }}.zip > gprxy-${{ matrix.os }}-${{ matrix.arch }}.zip.sha256
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: gprxy-${{ matrix.os }}-${{ matrix.arch }}
+        path: |
+          gprxy-${{ matrix.os }}-${{ matrix.arch }}*
+
+  build-container:
+    name: Build and Push Container
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository_owner }}/gprxy
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=raw,value=latest
+
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  create-release:
+    name: Create GitHub Release
+    needs: [ build-cli, build-container ]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+        find ./artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release-assets/ \;
+        ls -lah release-assets/
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        cat > release-notes.md << 'EOF'
+        ## Installation
+
+        ### CLI Binary
+
+        **Linux (amd64)**:
+        ```bash
+        curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/gprxy-linux-amd64.tar.gz | tar xz
+        sudo mv gprxy-linux-amd64 /usr/local/bin/gprxy
+        chmod +x /usr/local/bin/gprxy
+        ```
+
+        **Linux (arm64)**:
+        ```bash
+        curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/gprxy-linux-arm64.tar.gz | tar xz
+        sudo mv gprxy-linux-arm64 /usr/local/bin/gprxy
+        chmod +x /usr/local/bin/gprxy
+        ```
+
+        **macOS (Intel)**:
+        ```bash
+        curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/gprxy-darwin-amd64.tar.gz | tar xz
+        sudo mv gprxy-darwin-amd64 /usr/local/bin/gprxy
+        chmod +x /usr/local/bin/gprxy
+        ```
+
+        **macOS (Apple Silicon)**:
+        ```bash
+        curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/gprxy-darwin-arm64.tar.gz | tar xz
+        sudo mv gprxy-darwin-arm64 /usr/local/bin/gprxy
+        chmod +x /usr/local/bin/gprxy
+        ```
+
+        **Windows (PowerShell)**:
+        ```powershell
+        Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/gprxy-windows-amd64.zip" -OutFile "gprxy.zip"
+        Expand-Archive -Path gprxy.zip -DestinationPath .
+        Move-Item gprxy-windows-amd64.exe gprxy.exe
+        ```
+
+        ### Container Image
+
+        **Pull from GitHub Container Registry**:
+        ```bash
+        docker pull ghcr.io/${{ github.repository_owner }}/gprxy:${{ github.ref_name }}
+        docker pull ghcr.io/${{ github.repository_owner }}/gprxy:latest
+        ```
+
+        ### Verify Installation
+
+        ```bash
+        gprxy version
+        ```
+
+        ## Usage
+
+        ### 1. Login with SSO
+        ```bash
+        gprxy login
+        ```
+
+        ### 2. Check authentication status
+        ```bash
+        gprxy status
+        ```
+
+        ### 3. Connect to database (interactive)
+        ```bash
+        gprxy connect -h your-nlb-domain.elb.amazonaws.com -p 7777 -d postgres
+        ```
+
+        ### 4. Use with native psql
+        ```bash
+        TOKEN=$(cat ~/.gprxy/credentials | jq -r '.access_token')
+        PGPASSWORD="$TOKEN" psql -h your-nlb-domain.elb.amazonaws.com -p 7777 -U your.email@company.com -d postgres
+        ```
+
+        ## Changes in this release
+        See commit history for detailed changes.
+        EOF
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-assets/*
+        body_path: release-notes.md
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
