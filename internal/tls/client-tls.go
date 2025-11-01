@@ -25,7 +25,7 @@ func UpgradeToTLS(conn net.Conn, serverName string) (net.Conn, error) {
 	}
 
 	if response[0] == 'N' {
-		logger.Warn("proxy does  not support TLS")
+		logger.Warn("proxy does not support TLS")
 		return conn, nil
 	}
 

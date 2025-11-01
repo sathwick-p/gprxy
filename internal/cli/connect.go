@@ -157,7 +157,7 @@ func connect(cmd *cobra.Command, args []string) {
 
 		switch v := msg.(type) {
 		case *pgproto3.AuthenticationOk:
-			logger.Info("✓ Authentication successful!")
+			logger.Info("Authentication successful.")
 
 		case *pgproto3.ParameterStatus:
 			logger.Debug("Parameter: %s = %s", v.Name, v.Value)
@@ -166,7 +166,7 @@ func connect(cmd *cobra.Command, args []string) {
 			logger.Debug("Backend key data: PID=%d, SecretKey=%d", v.ProcessID, v.SecretKey)
 
 		case *pgproto3.ReadyForQuery:
-			logger.Info("✓ Connection established successfully!")
+			logger.Info("Connection established.")
 			logger.Info("Database: %s, User: %s", connectConfig.db_name, creds.UserInfo.Email)
 			logger.Info("Connection is ready for queries (TxStatus: %c)", v.TxStatus)
 			logger.Info("\nStarting interactive session...")

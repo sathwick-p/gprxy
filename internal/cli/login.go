@@ -174,15 +174,15 @@ func startCallbackServer(ctx context.Context, session *OAuthSession) (string, er
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, `
-				<html>
-				<head><title>Authentication Failed</title></head>
-				<body style="font-family: sans-serif; text-align: center; padding: 50px;">
-					<h1 style="color: #d32f2f;">Authentication Failed</h1>
-					<p>%s</p>
-					<p>You can close this window.</p>
-				</body>
-				</html>
-			`, errorParam)
+                <html>
+                <head><title>Authentication failed</title></head>
+                <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+                    <h1 style="color: #d32f2f;">Authentication failed</h1>
+                    <p>%s</p>
+                    <p>You can close this window.</p>
+                </body>
+                </html>
+            `, errorParam)
 
 			errChan <- logger.Errorf(errorParam + errorDesc)
 			return
@@ -218,15 +218,14 @@ func startCallbackServer(ctx context.Context, session *OAuthSession) (string, er
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `
-			<html>
-			<head><title>Authentication Successful</title></head>
-			<body style="font-family: sans-serif; text-align: center; padding: 50px;">
-			<h1 style="color: #4caf50;">✓ Authentication Successful!</h1>
-			<p>You have been successfully authenticated.</p>
-			<p style="color: #666;">You can close this window now and return to your application.</p>
-			</body>
-			</html>
-			`)
+            <html>
+            <head><title>Authentication successful</title></head>
+            <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #4caf50;">Authentication successful</h1>
+            <p>You can close this window and return to your application.</p>
+            </body>
+            </html>
+            `)
 
 		// send code to the main go routine
 

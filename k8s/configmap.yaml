@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gprxy-tls
+  namespace: gprxy
+data:
+  # TLS Certificate (base64 encoded or plain text PEM)
+  # Generate with: kubectl create secret tls gprxy-tls --cert=cert.pem --key=key.pem -n gprxy
+  # Or use cert-manager for automatic certificate management
+  README: |
+    For TLS, either:
+    1. Create a Secret with type kubernetes.io/tls
+    2. Use cert-manager to automatically provision certificates
+    3. Mount certificates from external secret management (AWS Secrets Manager, Vault)

@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Build artifacts
+gprxy
+*.exe
+*.test
+*.out
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage.txt
+*.log
+
+# Kubernetes
+k8s/
+*.yaml
+*.yml
+
+# Environment
+.env
+.env.local
+auth0/
+
