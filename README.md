@@ -1,4 +1,4 @@
-# gprxy — PostgreSQL proxy with OIDC auth and connection pooling
+# gprxy: sso-first, psql-compatible proxy: role mapping, audit trails, and pooled connections.
 
 [![CI](https://github.com/sathwick-p/gprxy/actions/workflows/release.yml/badge.svg)](https://github.com/sathwick-p/gprxy/actions/workflows/release.yml)
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-brightgreen.svg)](./LICENSE)
@@ -101,19 +101,19 @@ gprxy reads environment variables (and `.env` if present). Required values must 
 | Proxy | `PROXY_HOST` | `0.0.0.0` |  | Listen address |
 | Proxy | `PROXY_PORT` | `7777` |  | Listen port (PostgreSQL protocol) |
 | Backend | `DB_HOST` | `localhost` |  | PostgreSQL server hostname |
-| Backend | `GPRXY_USER` | — | ✅ | Service account username (for pooled connections) |
-| Backend | `GPRXY_PASS` | — | ✅ | Service account password |
+| Backend | `GPRXY_USER` | — | yes | Service account username (for pooled connections) |
+| Backend | `GPRXY_PASS` | — | yes | Service account password |
 | TLS | `PROXY_CERT` | — |  | Path to PEM cert; enables TLS if set |
 | TLS | `PROXY_KEY` | — |  | Path to PEM key |
 | Logging | `LOG_LEVEL` | `production` |  | `debug` for verbose logs |
-| OAuth (proxy) | `AUTH0_TENANT` | — | ✅ | Auth0 domain (e.g., `example.us.auth0.com`) |
-| OAuth (proxy) | `AUDIENCE` | — | ✅ | Token audience (e.g., `https://gprxy.io`) |
+| OAuth (proxy) | `AUTH0_TENANT` | — | yes | Auth0 domain (e.g., `example.us.auth0.com`) |
+| OAuth (proxy) | `AUDIENCE` | — | yes | Token audience (e.g., `https://gprxy.io`) |
 | Role mapping | `ROLE_MAPPING_<ROLE>` | — |  | Map OAuth role to `username:password` (any role name) |
 | Role mapping | `DEFAULT_ROLE` | — |  | Fallback role if user has no mapped roles |
-| CLI (login) | `AUTH0_NATIVE_CLIENT_ID` | — | ✅ | Native app client ID |
-| CLI (login) | `CALLBACK_URL` | — | ✅ | e.g., `http://localhost:8085/callback` |
+| CLI (login) | `AUTH0_NATIVE_CLIENT_ID` | — | yes | Native app client ID |
+| CLI (login) | `CALLBACK_URL` | — | yes | e.g., `http://localhost:8085/callback` |
 | CLI | `CONNECTION_NAME` | — |  | Optional Auth0 connection to preselect |
-| CLI | `PROXY_URL` | — | ✅ | Hostname to reach the proxy (NLB in k8s or `localhost` locally) |
+| CLI | `PROXY_URL` | — | yes | Hostname to reach the proxy (NLB in k8s or `localhost` locally) |
 
 Notes:
 - Roles are free-form; use any role names and provide matching `ROLE_MAPPING_<ROLE>=username:password`.
