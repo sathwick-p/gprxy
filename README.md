@@ -7,7 +7,7 @@
 
 gprxy is a Go-based PostgreSQL proxy that authenticates users with OAuth/OIDC (e.g., Auth0), maps their roles to PostgreSQL service accounts, and pools backend DB connections. It speaks the native PostgreSQL wire protocol, supports SCRAM/MD5, relays cancel requests correctly, and optionally serves TLS to clients. Run it locally or in Kubernetes behind an NLB.
 
-### Why gprxy (SSO, RBAC, Auditing)
+### Why gprxy
 - **SSO-first access (no DB passwords to manage)**: Developers authenticate via your IdP (OIDC). You don’t distribute or rotate per-user DB passwords.
 - **Per-user audit trail**: Logs include the actual user identity so you know who ran which queries, aiding investigations and compliance.
 - **Centralized RBAC**: Map IdP roles to database service accounts (free-form role names). Enforce least privilege and combine with Postgres RLS.
@@ -145,14 +145,14 @@ PGPASSWORD="$TOKEN" psql -h <proxy-host> -p 7777 -U your.email@company.com -d <d
 ./gprxy connect -s <db_host> -d <database> [-p 5432]
 ```
 
-### TLS note (casual)
-TLS code exists and works locally with the self‑signed certs in `certs/`. I haven’t yet figured out a simple, user‑friendly way to let everyone run it directly — totally open to suggestions and contributions.
+### TLS
+TLS code exists and works locally with the self‑signed certs in `certs/`. I haven’t yet figured out a simple, user‑friendly way to let everyone run it directly, open to suggestions and contributions.
 
 ## CLI Reference
-- `gprxy` — root command; version is injected at build time via `-X main.Version`.
-- `gprxy start` — start the proxy server.
-- `gprxy login` — PKCE login; starts a local server on `:8085/callback`, exchanges tokens, stores `~/.gprxy/credentials`. Auto‑refresh supported.
-- `gprxy connect -s <host> -d <db> [-p 5432]` — connect through the proxy using saved credentials; upgrades to TLS if proxy supports it.
+- `gprxy`: root command; version is injected at build time via `-X main.Version`.
+- `gprxy start`: start the proxy server.
+- `gprxy login`: PKCE login; starts a local server on `:8085/callback`, exchanges tokens, stores `~/.gprxy/credentials`. Auto‑refresh supported.
+- `gprxy connect -s <host> -d <db> [-p 5432]`: connect through the proxy using saved credentials; upgrades to TLS if proxy supports it.
 
 Flags (connect):
 - `-s, --host`: DB hostname or IP (required)
@@ -254,8 +254,5 @@ For clients, set `PROXY_URL` to the Service/NLB hostname (e.g., `gprxy-nlb.<...>
 ## Changelog / Releases
 - See `docs/changelog.md`.
 - Release artifacts are published on tags `v*.*.*` (multi‑arch binaries + GHCR image).
-
-## License
-Mozilla Public License 2.0 — see `LICENSE`.
 
 
