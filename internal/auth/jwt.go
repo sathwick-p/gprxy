@@ -245,8 +245,11 @@ func (v *JWTValidator) getPublicKey(kid string) (*rsa.PublicKey, error) {
 	}
 
 	logger.Debug("fetching jwks from %s", v.jwksURL)
-	err := v.fetchJWKS()
-	if err != nil {
+	if err := v.fetchJWKS(); err != nil {
+		if key, exists := v.publicKeys[kid]; exists {
+			logger.Warn("using stale JWKS key due to fetch failure")
+			return key, nil
+		}
 		return nil, err
 	}
 	key, exists := v.publicKeys[kid]
