@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"sync"
@@ -75,13 +76,20 @@ func NewServer(cfg *config.Config, tls *tls.Config) *Server {
 }
 
 // Start starts the proxy server and listens for client connections
-func (s *Server) Start() error {
+func (s *Server) Start(ctx context.Context) error {
 	listenAddr := net.JoinHostPort(s.config.ProxyHost, s.config.ProxyPort)
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return logger.Errorf("failed to start proxy server: %w", err)
 	}
 
+	go func() {
+		<-ctx.Done()
+		logger.Info("shutdown signal received, stopping listener")
+		ln.Close()
+	}()
+
+	var wg sync.WaitGroup
 	tlsStatus := "disabled"
 	if s.tlsConfig != nil {
 		tlsStatus = "enabled"
@@ -91,8 +99,16 @@ func (s *Server) Start() error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			logger.Error("failed to accept connection: %v", err)
-			continue
+			select {
+			case <-ctx.Done():
+				logger.Info("listner closed, waiting for active connections to drain")
+				wg.Wait()
+				logger.Info("all connnections drained, shutdown complete")
+				return nil
+			default:
+				logger.Error("failed to accept connection: %v", err)
+				continue
+			}
 		}
 
 		pc := &Connection{
@@ -101,6 +117,10 @@ func (s *Server) Start() error {
 			tlsConfig: s.tlsConfig,
 			server:    s,
 		}
-		go pc.handleConnection()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			go pc.handleConnection()
+		}()
 	}
 }

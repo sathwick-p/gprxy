@@ -18,110 +18,115 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "7777"
     spec:
+      terminationGracePeriodSeconds: 30
       serviceAccountName: gprxy
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
       containers:
-      - name: gprxy
-        image: 300703960986.dkr.ecr.us-west-2.amazonaws.com/go-automations:gprxy
-        imagePullPolicy: Always
-        ports:
-        - name: postgres
-          containerPort: 7777
-          protocol: TCP
-        env:
-        # Load all config from secret
-        - name: DB_HOST
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: DB_HOST
-        - name: GPRXY_USER
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: GPRXY_USER
-        - name: GPRXY_PASS
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: GPRXY_PASS
-        - name: AUTH0_TENANT
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: AUTH0_TENANT
-        - name: AUDIENCE
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: AUDIENCE
-        - name: ROLE_MAPPING_ADMIN
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: ROLE_MAPPING_ADMIN
-        - name: ROLE_MAPPING_ANALYST
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: ROLE_MAPPING_ANALYST
-              optional: true
-        - name: ROLE_MAPPING_VIEWER
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: ROLE_MAPPING_VIEWER
-              optional: true
-        - name: DEFAULT_ROLE
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: DEFAULT_ROLE
-        - name: LOG_LEVEL
-          valueFrom:
-            secretKeyRef:
-              name: gprxy-config
-              key: LOG_LEVEL
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          tcpSocket:
-            port: 7777
-          initialDelaySeconds: 10
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        readinessProbe:
-          tcpSocket:
-            port: 7777
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          capabilities:
-            drop:
-            - ALL
+        - name: gprxy
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
+          image: 300703960986.dkr.ecr.us-west-2.amazonaws.com/go-automations:gprxy
+          imagePullPolicy: Always
+          ports:
+            - name: postgres
+              containerPort: 7777
+              protocol: TCP
+          env:
+            # Load all config from secret
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: DB_HOST
+            - name: GPRXY_USER
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: GPRXY_USER
+            - name: GPRXY_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: GPRXY_PASS
+            - name: AUTH0_TENANT
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: AUTH0_TENANT
+            - name: AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: AUDIENCE
+            - name: ROLE_MAPPING_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: ROLE_MAPPING_ADMIN
+            - name: ROLE_MAPPING_ANALYST
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: ROLE_MAPPING_ANALYST
+                  optional: true
+            - name: ROLE_MAPPING_VIEWER
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: ROLE_MAPPING_VIEWER
+                  optional: true
+            - name: DEFAULT_ROLE
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: DEFAULT_ROLE
+            - name: LOG_LEVEL
+              valueFrom:
+                secretKeyRef:
+                  name: gprxy-config
+                  key: LOG_LEVEL
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            tcpSocket:
+              port: 7777
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 7777
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - gprxy
-              topologyKey: kubernetes.io/hostname
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - gprxy
+                topologyKey: kubernetes.io/hostname

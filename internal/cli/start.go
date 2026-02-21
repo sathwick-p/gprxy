@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"gprxy/internal/auth"
 	"gprxy/internal/config"
@@ -28,7 +31,8 @@ func startProxyServer(cmd *cobra.Command, args []string) {
 	// Initialize authentication (JWT + Role mapping)
 	auth0Tenant := os.Getenv("AUTH0_TENANT")
 	audience := os.Getenv("AUDIENCE")
-
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	if auth0Tenant == "" || audience == "" {
 		logger.Fatal("Missing OAuth configuration: Set AUTH0_TENANT and AUDIENCE")
 	}
@@ -42,6 +46,10 @@ func startProxyServer(cmd *cobra.Command, args []string) {
 	tlsConfig := tls.Load()
 	cfg := config.Load()
 	server := proxy.NewServer(cfg, tlsConfig)
-	log.Fatal(server.Start())
+	if err := server.Start(ctx); err != nil {
+		log.Fatal(err)
+	}
+	// log.Fatal(server.Start(ctx))
+	logger.Info("proxy exited cleanly")
 
 }
