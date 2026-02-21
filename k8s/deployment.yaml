@@ -6,7 +6,7 @@ metadata:
   labels:
     app: gprxy
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: gprxy
@@ -30,8 +30,8 @@ spec:
             preStop:
               exec:
                 command: ["/bin/sleep", "5"]
-          image: 300703960986.dkr.ecr.us-west-2.amazonaws.com/go-automations:gprxy
-          imagePullPolicy: Always
+          image: gprxy:local
+          imagePullPolicy: Never
           ports:
             - name: postgres
               containerPort: 7777
